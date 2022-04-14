@@ -14,6 +14,23 @@ import sys
 import numpy as np
 from bs4 import BeautifulSoup
 
+# step 0: settings about the joint
+JOINT_KEY = ['qpos', 'qvel', 'qfrc_constr', 'qfrc_act']
+ROOT_OB_SIZE = {
+    'qpos': {'free': 7, 'hinge': 1, 'slide': 1},
+    'qvel': {'free': 6, 'hinge': 1, 'slide': 1},
+    'qfrc_act': {'free': 6, 'hinge': 1, 'slide': 1},
+    'qfrc_constr': {'free': 6, 'hinge': 1, 'slide': 1}
+}
+EDGE_TYPE = {'self_loop': 0, 'root-root': 0,  # root-root is loop, also 0
+             'joint-joint': 1, 'geom-geom': 2, 'body-body': 3, 'tendon': 4,
+             'joint-geom': 5, 'geom-joint': -5,  # pc-relationship
+             'joint-body': 6, 'body-joint': -6,
+             'body-geom': 7, 'geom-body': -7,
+             'root-geom': 8, 'geom-root': -8,
+             'root-joint': 9, 'joint-root': -9,
+             'root-body': 10, 'body-root': -10}
+
 xml_path = "single_pendulum.xml"
 model = load_model_from_path(xml_path)
 sim = MjSim(model)
@@ -32,8 +49,6 @@ def _get_motor_names(xml_soup):
         return None
 
 def _get_tree_structure(xml_soup, node_type_allowed):
-    # step 0: settings about the joint
-    JOINT_KEY = ['qpos', 'qvel', 'qfrc_constr', 'qfrc_act']
     # development status
     ALLOWED_JOINT_TYPE = ['hinge', 'free', 'slide']
 
@@ -109,9 +124,106 @@ def _get_tree_structure(xml_soup, node_type_allowed):
     for i_key in node_type_allowed:
         node_type_dict[i_key] = [i_node['id'] for i_node in tree
                                  if i_key == i_node['type']]
-        assert len(node_type_dict) >= 1, logger.error(
-            'Missing node type {}'.format(i_key))
+        if len(node_type_dict) < 1 :
+            print('Missing node type {}'.format(i_key))
     return tree, node_type_dict
+
+def _append_tree_relation(tree, node_type_allowed, root_connection_option):
+    '''
+        @brief:
+            build the relationship matrix and append relationship attribute
+            to the nodes of the tree
+
+        @input:
+            @root_connection_option:
+                'nN, Rn': without neighbour, no additional connection
+                'nN, Rb': without neighbour, root connected to all body
+                'nN, Ra': without neighbour, root connected to all node
+                'yN, Rn': with neighbour, no additional connection
+    '''
+    num_node = len(tree)
+    relation_matrix = np.zeros([num_node, num_node], dtype=np.int)
+
+    # step 1: set graph connection relationship
+    for i_node in tree:
+        # step 1.1: get the id of the children
+        children = i_node['raw'].find_all(recursive=False)
+        if len(children) == 0:
+            continue
+        children_names = [i_children.name + '_' + i_children['name']
+                          for i_children in children
+                          if i_children.name in node_type_allowed]
+        children_id_list = [
+            [node['id'] for node in tree if node['name'] == i_children_name]
+            for i_children_name in children_names
+        ]
+
+        i_node['children_id_list'] = children_id_list = \
+            sum(children_id_list, [])  # squeeze the list
+        current_id = i_node['id']
+        current_type = tree[current_id]['type']
+
+        # step 1.2: set the children-parent relationship edges
+        for i_children_id in i_node['children_id_list']:
+            relation_matrix[current_id, i_children_id] = \
+                EDGE_TYPE[current_type + '-' + tree[i_children_id]['type']]
+            relation_matrix[i_children_id, current_id] = \
+                EDGE_TYPE[tree[i_children_id]['type'] + '-' + current_type]
+            if tree[current_id]['type'] == 'body':
+                tree[i_children_id]['parent'] = current_id
+
+        # step 1.3 (optional): set children connected if needed
+        if 'yN' in root_connection_option:
+            for i_node_in_use_1 in i_node['children_id_list']:
+                for i_node_in_use_2 in i_node['children_id_list']:
+                    relation_matrix[i_node_in_use_1, i_node_in_use_2] = \
+                        EDGE_TYPE[tree[i_node_in_use_1]['type'] + '-' +
+                                  tree[i_node_in_use_2]['type']]
+
+        else:
+            if 'nN' not in root_connection_option:
+                print(
+                'Unrecognized root_connection_option: {}'.format(
+                    root_connection_option
+                )
+            )
+
+    # step 2: set root connection
+    if 'Ra' in root_connection_option:
+        # if root is connected to all the nodes
+        for i_node_in_use_1 in range(len(tree)):
+            target_node_type = tree[i_node_in_use_1]['type']
+
+            # add connections between all nodes and root
+            relation_matrix[0, i_node_in_use_1] = \
+                EDGE_TYPE['root' + '-' + target_node_type]
+            relation_matrix[i_node_in_use_1, 0] = \
+                EDGE_TYPE[target_node_type + '-' + 'root']
+
+    elif 'Rb' in root_connection_option:
+        for i_node_in_use_1 in range(len(tree)):
+            target_node_type = tree[i_node_in_use_1]['type']
+
+            if not target_node_type == 'body':
+                continue
+
+            # add connections between body and root
+            relation_matrix[0, i_node_in_use_1] = \
+                EDGE_TYPE['root' + '-' + target_node_type]
+            relation_matrix[i_node_in_use_1, 0] = \
+                EDGE_TYPE[target_node_type + '-' + 'root']
+    else:
+        if 'Rn' not in root_connection_option:
+            print(
+            'Unrecognized root_connection_option: {}'.format(
+                root_connection_option
+            )
+        )
+
+    # step 3: unset the diagonal terms back to 'self-loop'
+    np.fill_diagonal(relation_matrix, EDGE_TYPE['self_loop'])
+
+    return tree, relation_matrix
 
 
 # load xml file
@@ -124,7 +236,14 @@ node_type_allowed = ['root', 'joint', 'body', 'geom']
 # get the basic information of the nodes ready
 tree, node_type_dict = _get_tree_structure(xml_soup, node_type_allowed)
 
-
+# step 1: get the neighbours and relation tree
+# root_connection_option :
+# yN : with neighbor
+# nN : without neighbour
+# Rn : no additional connection
+# Rb : root connected to all body
+# Ra : root connected to all node
+tree, relation_matrix = _append_tree_relation(tree, node_type_allowed, root_connection_option = 'nN, Rb, uE')
 print('process')
 
 while True:
