@@ -15,13 +15,23 @@ import numpy as np
 from bs4 import BeautifulSoup
 
 # step 0: settings about the joint
+# qpos : position of each joint in the simulation
+# qvel : velocity of joints
+# qfrc_constr : constraint force
+# qfrc_act : actuator force
 JOINT_KEY = ['qpos', 'qvel', 'qfrc_constr', 'qfrc_act']
+# cinert : com-based body inertia and mass
+# cvel : com-based velocity[3D rot, 3D tran]
+# cfrc : com-based force
+BODY_KEY = ['cinert', 'cvel', 'cfrc']
+
 ROOT_OB_SIZE = {
     'qpos': {'free': 7, 'hinge': 1, 'slide': 1},
     'qvel': {'free': 6, 'hinge': 1, 'slide': 1},
     'qfrc_act': {'free': 6, 'hinge': 1, 'slide': 1},
     'qfrc_constr': {'free': 6, 'hinge': 1, 'slide': 1}
 }
+
 EDGE_TYPE = {'self_loop': 0, 'root-root': 0,  # root-root is loop, also 0
              'joint-joint': 1, 'geom-geom': 2, 'body-body': 3, 'tendon': 4,
              'joint-geom': 5, 'geom-joint': -5,  # pc-relationship
@@ -30,6 +40,41 @@ EDGE_TYPE = {'self_loop': 0, 'root-root': 0,  # root-root is loop, also 0
              'root-geom': 8, 'geom-root': -8,
              'root-joint': 9, 'joint-root': -9,
              'root-body': 10, 'body-root': -10}
+
+OB_MAP = {
+        'Humanoid-v1':
+            ['qpos', 'qvel', 'cinert', 'cvel', 'qfrc_act', 'cfrc'],
+        'HumanoidStandup-v1':
+            ['qpos', 'qvel', 'cinert', 'cvel', 'qfrc_act', 'cfrc'],
+        'HalfCheetah-v1': ['qpos', 'qvel'],
+        'Hopper-v1': ['qpos', 'qvel'],
+        'Walker2d-v1': ['qpos', 'qvel'],
+        'AntS-v1': ['qpos', 'qvel', 'cfrc'],
+        'Swimmer-v1': ['qpos', 'qvel'],
+
+        'WalkersHopper-v1': ['qpos', 'qvel'],
+        'WalkersHalfhumanoid-v1': ['qpos', 'qvel'],
+        'WalkersHalfcheetah-v1': ['qpos', 'qvel'],
+        'WalkersFullcheetah-v1': ['qpos', 'qvel'],
+        'WalkersOstrich-v1': ['qpos', 'qvel'],
+        'WalkersKangaroo-v1': ['qpos', 'qvel']
+}
+
+# step 1: register the settings for traditional environments
+SYMMETRY_MAP = {'Humanoid-v1': 2,
+                'HumanoidStandup-v1': 2,
+                'HalfCheetah-v1': 1,
+                'Hopper-v1': 1,
+                'Walker2d-v1': 1,
+                'AntS-v1': 2,
+                'Swimmer-v1': 2,
+
+                'WalkersHopper-v1': 1,
+                'WalkersHalfhumanoid-v1': 1,
+                'WalkersHalfcheetah-v1': 1,
+                'WalkersFullcheetah-v1': 1,
+                'WalkersOstrich-v1': 1,
+                'WalkersKangaroo-v1': 1}
 
 xml_path = "single_pendulum.xml"
 model = load_model_from_path(xml_path)
@@ -225,6 +270,177 @@ def _append_tree_relation(tree, node_type_allowed, root_connection_option):
 
     return tree, relation_matrix
 
+def _append_tendon_relation(tree, relation_matrix, xml_soup):
+    '''
+        @brief:
+            build the relationship of tendon (the spring)
+    '''
+    tendon = xml_soup.find('tendon')
+    if tendon is None:
+        return tree, relation_matrix
+    tendon_list = tendon.find_all('fixed')
+
+    for i_tendon in tendon_list:
+        # find the id
+        joint_name = ['joint_' + joint['joint']
+                      for joint in i_tendon.find_all('joint')]
+        joint_id = [node['id'] for node in tree if node['name'] in joint_name]
+        if len(joint_id) != 2: print(
+            'Unsupported tendon: {}'.format(i_tendon))
+
+        # update the tree and the relationship matrix
+        relation_matrix[joint_id[0], joint_id[1]] = EDGE_TYPE['tendon']
+        relation_matrix[joint_id[1], joint_id[0]] = EDGE_TYPE['tendon']
+        tree[joint_id[0]]['tendon_nodes'].append(joint_id[1])
+        tree[joint_id[1]]['tendon_nodes'].append(joint_id[0])
+
+        print(
+            'new tendon found between: {} and {}'.format(
+                tree[joint_id[0]]['name'], tree[joint_id[1]]['name']
+            )
+        )
+
+    return tree, relation_matrix
+
+def _get_input_info(tree, task_name):
+    input_dict = {}
+
+    joint_id = [node['id'] for node in tree if node['type'] == 'joint']
+    body_id = [node['id'] for node in tree if node['type'] == 'body']
+    root_id = [node['id'] for node in tree if node['type'] == 'root'][0]
+
+    # init the input dict
+    input_dict[root_id] = []
+    if 'cinert' in OB_MAP[task_name] or \
+            'cvel' in OB_MAP[task_name] or 'cfrc' in OB_MAP[task_name]:
+        candidate_id = joint_id + body_id
+    else:
+        candidate_id = joint_id
+    for i_id in candidate_id:
+        input_dict[i_id] = []
+
+    print('scanning ob information...')
+    current_ob_id = 0
+    for ob_type in OB_MAP[task_name]:
+
+        if ob_type in JOINT_KEY:
+            # step 1: collect the root ob's information. Some ob might be
+            # ignore, which is specify in the SYMMETRY_MAP
+            ob_step = tree[0][ob_type + '_size'] - \
+                (ob_type == 'qpos') * SYMMETRY_MAP[task_name]
+            input_dict[root_id].extend(
+                range(current_ob_id, current_ob_id + ob_step)
+            )
+            current_ob_id += ob_step
+
+            # step 2: collect the joint ob's information
+            for i_id in joint_id:
+                input_dict[i_id].append(current_ob_id)
+                current_ob_id += 1
+
+        elif ob_type in BODY_KEY:
+
+            BODY_OB_SIZE = 10 if ob_type == 'cinert' else 6
+
+            # step 0: skip the 'world' body
+            current_ob_id += BODY_OB_SIZE
+
+            # step 1: collect the root ob's information, note that the body will
+            # still take this ob
+            input_dict[root_id].extend(
+                range(current_ob_id, current_ob_id + BODY_OB_SIZE)
+            )
+            # current_ob_id += BODY_OB_SIZE
+
+            # step 2: collect the body ob's information
+            for i_id in body_id:
+                input_dict[i_id].extend(
+                    range(current_ob_id, current_ob_id + BODY_OB_SIZE)
+                )
+                current_ob_id += BODY_OB_SIZE
+        else:
+            if 'add' not in ob_type: \
+                print('TYPE {BODY_KEY} NOT RECGNIZED'.format(ob_type))
+            addition_ob_size = int(ob_type.split('_')[-1])
+            input_dict[root_id].extend(
+                range(current_ob_id, current_ob_id + addition_ob_size)
+            )
+            current_ob_id += addition_ob_size
+        print(
+            'after {}, the ob size is reaching {}'.format(
+                ob_type, current_ob_id
+            )
+        )
+    return input_dict, current_ob_id  # to debug if the ob size is matched
+
+def _get_output_info(tree, xml_soup, gnn_output_option):
+    output_list = []
+    output_type_dict = {}
+    motors = xml_soup.find('actuator').find_all('motor')
+
+    for i_motor in motors:
+        joint_id = [i_node['id'] for i_node in tree
+                    if 'joint_' + i_motor['joint'] == i_node['name']]
+        if len(joint_id) == 0:
+            # joint_id = 0  # it must be the root if not found
+            print(
+                'Motor {} not found!'.format(i_motor['joint'])
+            )
+        else:
+            joint_id = joint_id[0]
+        tree[joint_id]['is_output_node'] = True
+        output_list.append(joint_id)
+
+        # construct the output_type_dict
+        if gnn_output_option == 'shared':
+            motor_type_name = i_motor['joint'].split('_')[0]
+            if motor_type_name in output_type_dict:
+                output_type_dict[motor_type_name].append(joint_id)
+            else:
+                output_type_dict[motor_type_name] = [joint_id]
+        elif gnn_output_option == 'separate':
+            motor_type_name = i_motor['joint']
+            output_type_dict[motor_type_name] = [joint_id]
+        else:
+            if gnn_output_option != 'unified': print(
+                'Invalid output type: {}'.format(gnn_output_option)
+            )
+            if 'unified' in output_type_dict:
+                output_type_dict['unified'].append(joint_id)
+            else:
+                output_type_dict['unified'] = [joint_id]
+
+    return tree, output_list, output_type_dict, len(motors)
+
+
+
+
+'''
+    @brief:
+        get the tree of "geom", "body", "joint" built up.
+
+    @return:
+        @tree: This function will return a list of dicts. Every dict
+            contains the information of node.
+
+            tree[id_of_the_node]['name']: the unique identifier of the node
+
+            tree[id_of_the_node]['neighbour']: is the list for the
+            neighbours
+
+            tree[id_of_the_node]['type']: could be 'geom', 'body' or
+            'joint'
+
+            tree[id_of_the_node]['info']: debug info from the xml. it
+            should not be used during model-free optimization
+
+            tree[id_of_the_node]['is_output_node']: True or False
+
+        @input_dict: input_dict['id_of_the_node'] = [position of the ob]
+
+        @output_list: This correspond to the id of the node where a output
+            is available
+'''
 
 # load xml file
 infile = open(xml_path, 'r')
@@ -244,6 +460,22 @@ tree, node_type_dict = _get_tree_structure(xml_soup, node_type_allowed)
 # Rb : root connected to all body
 # Ra : root connected to all node
 tree, relation_matrix = _append_tree_relation(tree, node_type_allowed, root_connection_option = 'nN, Rb, uE')
+
+# step 2: get the tendon relationship ready
+tree, relation_matrix = _append_tendon_relation(tree,
+                                                relation_matrix,
+                                                xml_soup)
+
+# step 3: get the input list ready
+# task_name is specific xml model.
+task_name = 'Humanoid-v1'
+input_dict, ob_size = _get_input_info(tree, task_name)
+
+# step 4: get the output list ready
+gnn_output_option='shared'
+tree, output_list, output_type_dict, action_size = \
+    _get_output_info(tree, xml_soup, gnn_output_option)
+
 print('process')
 
 while True:
