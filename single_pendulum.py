@@ -13,6 +13,9 @@ import os
 import sys
 import numpy as np
 from bs4 import BeautifulSoup
+# import tensorflow as tf
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
 
 # step 0: settings about the joint
 # qpos : position of each joint in the simulation
@@ -75,6 +78,29 @@ SYMMETRY_MAP = {'Humanoid-v1': 2,
                 'WalkersFullcheetah-v1': 1,
                 'WalkersOstrich-v1': 1,
                 'WalkersKangaroo-v1': 1}
+
+PARAMETERS_DEFAULT_DICT = {
+    'root': {},
+    'body': {'pos': 'NON_DEFAULT'},
+    'geom': {
+        'fromto': '-1 -1 -1 -1 -1 -1',
+        'size': 'NON_DEFAULT',
+        'type': 'NON_DEFAULT'
+    },
+    'joint': {
+        'armature': '-1',
+        'axis': 'NON_DEFAULT',
+        'damping': '-1',
+        'pos': 'NON_DEFAULT',
+        'stiffness': '-1',
+        'range': '-1 -1'
+    }
+}
+
+GEOM_TYPE_ENCODE = {
+    'capsule': [0.0, 1.0],
+    'sphere': [1.0, 0.0],
+}
 
 xml_path = "single_pendulum.xml"
 model = load_model_from_path(xml_path)
@@ -412,7 +438,676 @@ def _get_output_info(tree, xml_soup, gnn_output_option):
 
     return tree, output_list, output_type_dict, len(motors)
 
+def _get_para_list(xml_soup, node_type_allowed):
+    '''
+        @brief:
+            for each type in the node_type_allowed, we find the attributes that
+            shows up in the xml
+            below is the node parameter info list:
 
+            @root (size 0):
+                More often the case, the root node is the domain root, as
+                there is the 2d/3d information in it.
+
+            @body (max size: 3):
+                @pos: 3
+
+            @geom (max size: 9):
+                @fromto: 6
+                @size: 1
+                @type: 2
+
+            @joint (max size: 11):
+                @armature: 1
+                @axis: 3
+                @damping: 1
+                @pos: 3
+                @stiffness: 1  # important
+                @range: 2
+    '''
+    # step 1: get the available parameter list for each node
+    para_list = {node_type: [] for node_type in node_type_allowed}
+    mj_soup = xml_soup.find('worldbody').find('body')
+    for node_type in node_type_allowed:
+        # search the node with type 'node_type'
+        node_list = mj_soup.find_all(node_type)  # all the nodes
+        for i_node in node_list:
+            # deal with each node
+            for key in i_node.attrs:
+                # deal with each attributes
+                if key not in para_list[node_type] and \
+                        key in PARAMETERS_DEFAULT_DICT[node_type]:
+                    para_list[node_type].append(key)
+
+    # step 2: get default parameter settings
+    default_dict = PARAMETERS_DEFAULT_DICT
+    default_soup = xml_soup.find('default')
+    if default_soup != None:
+        for node_type, para_type_list in para_list.items():
+            # find the default str if possible
+            type_soup = default_soup.find(node_type)
+            if type_soup != None:
+                for para_type in para_type_list:
+                    if para_type in type_soup.attrs:
+                        default_dict[node_type][para_type] = \
+                            type_soup[para_type]
+            else:
+                print(
+                    'No default settings available for type {}'.format(
+                        node_type
+                    )
+                )
+    else:
+        print('No default settings available for this xml!')
+
+    return para_list, default_dict
+
+def _collect_parameter_info(output_parameter,
+                            parameter_type,
+                            node_type,
+                            default_dict,
+                            info_dict):
+    # step 1: get the parameter str
+    if parameter_type in info_dict:
+        # append the default setting into default_dict
+        para_str = info_dict[parameter_type]
+    elif parameter_type in default_dict[node_type]:
+        para_str = default_dict[node_type][parameter_type]
+    else:
+        if True: print(
+            'no information available for node: {}, para: {}'.format(
+                node_type, parameter_type
+            )
+        )
+
+    # step 2: parse the str into the parameter numbers
+    if node_type == 'geom' and para_str in GEOM_TYPE_ENCODE:
+        output_parameter.extend(GEOM_TYPE_ENCODE[para_str])
+    else:
+        output_parameter.extend(
+            [float(element) for element in para_str.split(' ')]
+        )
+
+    return output_parameter
+
+
+def _append_node_parameters(tree,
+                            xml_soup,
+                            node_type_allowed,
+                            gnn_embedding_option):
+    '''
+        @brief:
+            the output of this function is a dictionary.
+        @output:
+            e.g.: node_parameters['geom'] is a numpy array, which has the shape
+            of (num_nodes, para_size_of_'geom')
+            the node is ordered in the relative position in the tree
+    '''
+    assert node_type_allowed.index('joint') < node_type_allowed.index('body')
+
+    if gnn_embedding_option == 'parameter':
+        # step 0: get the para list and default setting for this mujoco xml
+        PARAMETERS_LIST, default_dict = _get_para_list(xml_soup,
+                                                       node_type_allowed)
+
+        # step 2: get the node_parameter_list ready, they are in the node_order
+        node_parameters = {node_type: [] for node_type in node_type_allowed}
+        for node_id in range(len(tree)):
+            output_parameter = []
+
+            for i_parameter_type in PARAMETERS_LIST[tree[node_id]['type']]:
+                # collect the information one by one
+                output_parameter = _collect_parameter_info(
+                    output_parameter, i_parameter_type,
+                    tree[node_id]['type'], default_dict, tree[node_id]['info']
+                )
+
+            # this node is finished
+            node_parameters[tree[node_id]['type']].append(output_parameter)
+
+        # step 3: numpy the elements, and do validation check
+        for node_type in node_type_allowed:
+            node_parameters[node_type] = np.array(node_parameters[node_type],
+                                                  dtype=np.float32)
+
+        # step 4: get the size of parameters logged
+        para_size_dict = {
+            node_type: len(node_parameters[node_type][0])
+            for node_type in node_type_allowed
+        }
+
+        # step 5: trick, root para is going to receive a dummy para [1]
+        para_size_dict['root'] = 1
+        node_parameters['root'] = np.ones([1, 1])
+    elif gnn_embedding_option in \
+            ['shared', 'noninput_separate', 'noninput_shared']:
+        # step 1: preprocess, register the node, get the number of bits for
+        # encoding needed
+        struct_name_list = {node_type: [] for node_type in node_type_allowed}
+        for node_id in range(len(tree)):
+            name = tree[node_id]['name'].split('_')
+            type_name = name[0]
+
+            if gnn_embedding_option in ['noninput_separate']:
+                register_name = name
+                struct_name_list[type_name].append(register_name)
+            else:  # shared
+                register_name = type_name + '_' + name[1]
+                if register_name not in struct_name_list[type_name]:
+                    struct_name_list[type_name].append(register_name)
+            tree[node_id]['register_embedding_name'] = register_name
+
+        struct_name_list['root'] = [tree[0]['name']]  # the root
+        tree[0]['register_embedding_name'] = tree[0]['name']
+
+        # step 2: estimate the encoding length
+        num_type_bits = 2
+        para_size_dict = {  # 2 bits for type encoding
+            i_node_type: num_type_bits + 8
+            for i_node_type in node_type_allowed
+        }
+
+        # step 3: get the parameters
+        node_parameters = {i_node_type: []
+                           for i_node_type in node_type_allowed}
+        appear_str = []
+        for node_id in range(len(tree)):
+            type_name = tree[node_id]['type']
+            type_str = str(bin(node_type_allowed.index(type_name)))
+            type_str = (type_str[2:]).zfill(num_type_bits)
+            node_str = str(bin(struct_name_list[type_name].index(
+                tree[node_id]['register_embedding_name']
+            )))
+            node_str = (node_str[2:]).zfill(
+                para_size_dict[tree[node_id]['type']] - 2
+            )
+
+            if node_id == 0 or para_size_dict[type_name] == 2:
+                node_str = ''
+
+            final_str = type_str + node_str
+            if final_str not in appear_str:
+                appear_str.append(final_str)
+
+            if 'noninput_shared_multi' in gnn_embedding_option:
+                node_parameters[type_name].append(
+                    tree[node_id]['register_embedding_name']
+                )
+            elif 'noninput' in gnn_embedding_option:
+                node_parameters[type_name].append([appear_str.index(final_str)])
+            else:
+                node_parameters[type_name].append(
+                    [int(i_char) for i_char in final_str]
+                )
+
+        # step 4: numpy the elements, and do validation check
+        if gnn_embedding_option != 'noninput_shared_multi':
+            para_dtype = np.float32 \
+                if gnn_embedding_option in ['parameter', 'shared'] \
+                else np.int32
+            for node_type in node_type_allowed:
+                node_parameters[node_type] = \
+                    np.array(node_parameters[node_type], dtype=para_dtype)
+    else:
+        if True: print(
+            'Invalid option: {}'.format(gnn_embedding_option)
+        )
+
+    # step 5: postprocess
+    # NOTE: make the length of the parameters the same
+    if gnn_embedding_option in ['parameter', 'shared']:
+        max_length = max([para_size_dict[node_type]
+                         for node_type in node_type_allowed])
+        for node_type in node_type_allowed:
+            shape = node_parameters[node_type].shape
+            new_node_parameters = np.zeros([shape[0], max_length], dtype=np.int)
+            new_node_parameters[:, 0: shape[1]] = node_parameters[node_type]
+            node_parameters[node_type] = new_node_parameters
+            para_size_dict[node_type] = max_length
+    else:
+        para_size_dict = {i_node_type: 1 for i_node_type in node_type_allowed}
+
+    return node_parameters, para_size_dict
+
+def _prune_body_nodes(tree,
+                      relation_matrix,
+                      node_type_dict,
+                      input_dict,
+                      node_parameters,
+                      para_size_dict,
+                      root_connection_option):
+    '''
+        @brief:
+            In this function, we will have to remove the body node.
+            1. delete all the the bodys, whose ob will be placed into its kid
+                joint (multiple joints possible)
+            2. for the root node, if kid joint exists, transfer the ownership
+                body ob into the kids
+    '''
+    # make sure the tree is structured in a 'root', 'joint', 'body' order
+    assert node_type_dict['root'] == [0] and \
+        max(node_type_dict['joint']) < min(node_type_dict['body']) and \
+        'geom' not in node_type_dict
+
+    # for each joint, let it eat its father body root, the relation_matrix and
+    # input_dict need to be inherited
+    for node_id, i_node in enumerate(tree[0: min(node_type_dict['body'])]):
+        if i_node['type'] != 'joint':
+            assert i_node['type'] == 'root'
+            continue
+
+        # find all the parent
+        parent = i_node['parent']
+
+        # inherit the input observation
+        if parent in input_dict:
+            input_dict[node_id] += input_dict[parent]
+        '''
+            1. inherit the joint with shared body, only the first joint will
+                inherit the AB_body's relationship. other joints will be
+                attached to the first joint
+                A_joint ---- AB_body ---- B_joint. On
+            2. inherit joint-joint relationships for sybling joints:
+                A_joint ---- A_body ---- B_body ---- B_joint
+            3. inherit the root-joint connection
+                A_joint ---- A_body ---- root
+        '''
+        # step 1: check if there is brothers / sisters of this node
+        children = np.where(
+            relation_matrix[parent, :] == EDGE_TYPE['body-joint']
+        )[0]
+        first_brother = [child_id for child_id in children
+                         if child_id != node_id and child_id < node_id]
+        if len(first_brother) > 0:
+            first_brother = min(first_brother)
+            relation_matrix[node_id, first_brother] = EDGE_TYPE['joint-joint']
+            relation_matrix[first_brother, node_id] = EDGE_TYPE['joint-joint']
+            continue
+
+        # step 2: the type 2 relationship, note that only the first brother
+        # will be considered
+        uncles = np.where(
+            relation_matrix[parent, :] == EDGE_TYPE['body-body']
+        )[0]
+        for i_uncle in uncles:
+            syblings = np.where(
+                relation_matrix[i_uncle, :] == EDGE_TYPE['body-joint']
+            )[0]
+            if len(syblings) > 0:
+                sybling = syblings[0]
+            else:
+                continue
+            if tree[sybling]['parent'] is tree[i_uncle]['parent']:
+                continue
+            relation_matrix[node_id, sybling] = EDGE_TYPE['joint-joint']
+            relation_matrix[sybling, node_id] = EDGE_TYPE['joint-joint']
+
+        # step 3: the type 3 relationship
+        uncles = np.where(
+            relation_matrix[parent, :] == EDGE_TYPE['body-root']
+        )[0]
+        assert len(uncles) <= 1
+        for i_uncle in uncles:
+            relation_matrix[node_id, i_uncle] = EDGE_TYPE['joint-root']
+            relation_matrix[i_uncle, node_id] = EDGE_TYPE['root-joint']
+
+    # remove all the body root
+    first_body_node = min(node_type_dict['body'])
+    tree = tree[:first_body_node]
+    relation_matrix = relation_matrix[:first_body_node, :first_body_node]
+    for i_body_node in node_type_dict['body']:
+        if i_body_node in input_dict:
+            input_dict.pop(i_body_node)
+    node_parameters.pop('body')
+    node_type_dict.pop('body')
+    para_size_dict.pop('body')
+
+    for i_node in node_type_dict['joint']:
+        assert len(input_dict[i_node]) == len(input_dict[1])
+
+    return tree, relation_matrix, node_type_dict, \
+        input_dict, node_parameters, para_size_dict
+
+def construct_ob_size_dict(node_info, input_feat_dim):
+    '''
+        @brief: for each node type, we collect the ob size for this type
+    '''
+    node_info['ob_size_dict'] = {}
+    for node_type in node_info['node_type_dict']:
+        node_ids = node_info['node_type_dict'][node_type]
+
+        # record the ob_size for each type of node
+        if node_ids[0] in node_info['input_dict']:
+            node_info['ob_size_dict'][node_type] = \
+                len(node_info['input_dict'][node_ids[0]])
+        else:
+            node_info['ob_size_dict'][node_type] = 0
+
+        node_ob_size = [
+            len(node_info['input_dict'][node_id])
+            for node_id in node_ids if node_id in node_info['input_dict']
+        ]
+
+        if len(node_ob_size) == 0:
+            continue
+
+        assert node_ob_size.count(node_ob_size[0]) == len(node_ob_size), \
+            print('Nodes (type {}) have wrong ob size: {}!'.format(
+                node_type, node_ob_size
+            ))
+
+    return node_info
+
+def get_inverse_type_offset(node_info, mode):
+    if mode not in ['output', 'node']: print(
+        'Invalid mode: {}'.format(mode)
+    )
+    inv_extype_offset = 'inverse_' + mode + '_extype_offset'
+    inv_intype_offset = 'inverse_' + mode + '_intype_offset'
+    inv_self_offset = 'inverse_' + mode + '_self_offset'
+    inv_original_id = 'inverse_' + mode + '_original_id'
+    node_info[inv_extype_offset] = []
+    node_info[inv_intype_offset] = []
+    node_info[inv_self_offset] = []
+    node_info[inv_original_id] = []
+    current_offset = 0
+    for mode_type in node_info[mode + '_type_dict']:
+        i_length = len(node_info[mode + '_type_dict'][mode_type])
+        # the original id
+        node_info[inv_original_id].extend(
+            node_info[mode + '_type_dict'][mode_type]
+        )
+
+        # In one batch, how many element is listed before this type?
+        # e.g.: [A, A, C, B, C, A], with order [A, B, C] --> [0, 0, 4, 3, 4, 0]
+        node_info[inv_extype_offset].extend(
+            [current_offset] * i_length
+        )
+
+        # In current type, what is the position of this node?
+        # e.g.: [A, A, C, B, C, A] --> [0, 1, 0, 0, 1, 2]
+        node_info[inv_intype_offset].extend(
+            range(i_length)
+        )
+
+        # how many nodes are in this type?
+        # e.g.: [A, A, C, B, C, A] --> [3, 3, 2, 1, 2, 3]
+        node_info[inv_self_offset].extend(
+            [i_length] * i_length
+        )
+        current_offset += i_length
+
+    sorted_id = np.array(node_info[inv_original_id])
+    sorted_id.sort()
+    node_info[inv_original_id] = [
+        node_info[inv_original_id].index(i_node)
+        for i_node in sorted_id
+    ]
+
+    node_info[inv_extype_offset] = np.array(
+        [node_info[inv_extype_offset][i_node]
+         for i_node in node_info[inv_original_id]]
+    )
+    node_info[inv_intype_offset] = np.array(
+        [node_info[inv_intype_offset][i_node]
+         for i_node in node_info[inv_original_id]]
+    )
+    node_info[inv_self_offset] = np.array(
+        [node_info[inv_self_offset][i_node]
+         for i_node in node_info[inv_original_id]]
+    )
+
+    return node_info
+
+def get_receive_send_idx(node_info):
+    # register the edges that shows up, get the number of edge type
+    edge_dict = EDGE_TYPE
+    edge_type_list = []  # if one type of edge exist, register
+
+    for edge_id in edge_dict.values():
+        if edge_id == 0:
+            continue  # the self loop is not considered here
+        if (node_info['relation_matrix'] == edge_id).any():
+            edge_type_list.append(edge_id)
+
+    node_info['edge_type_list'] = edge_type_list
+    node_info['num_edge_type'] = len(edge_type_list)
+
+    receive_idx_raw = {}
+    receive_idx = []
+    send_idx = {}
+    for edge_type in node_info['edge_type_list']:
+        receive_idx_raw[edge_type] = []
+        send_idx[edge_type] = []
+        i_id = np.where(node_info['relation_matrix'] == edge_type)
+        for i_edge in range(len(i_id[0])):
+            send_idx[edge_type].append(i_id[0][i_edge])
+            receive_idx_raw[edge_type].append(i_id[1][i_edge])
+            receive_idx.append(i_id[1][i_edge])
+
+    node_info['receive_idx'] = receive_idx
+    node_info['receive_idx_raw'] = receive_idx_raw
+    node_info['send_idx'] = send_idx
+    node_info['num_edges'] = len(receive_idx)
+
+    return node_info
+
+hidden_dim = 64
+
+def prepare_placeholders():
+    '''
+        @brief:
+            get the input placeholders ready. The _input placeholder has
+            different size from the input we use for the general network.
+    '''
+    # step 1: build the input_obs and input_parameters
+    input_obs = {
+        node_type: tf.placeholder(
+            tf.float32,
+            [None, node_info['ob_size_dict'][node_type]],
+            name='input_ob_placeholder_ggnn'
+        )
+        for node_type in node_info['node_type_dict']
+    }
+
+    input_hidden_state = {
+        node_type: tf.placeholder(
+            tf.float32,
+            [None, hidden_dim],
+            name='input_hidden_dim_' + node_type
+        )
+        for node_type in node_info['node_type_dict']
+    }
+
+    input_parameter_dtype = tf.int32 \
+        if 'noninput' in gnn_embedding_option else tf.float32
+    input_parameters = {
+        node_type: tf.placeholder(
+            input_parameter_dtype,
+            [None, node_info['para_size_dict'][node_type]],
+            name='input_para_placeholder_ggnn')
+        for node_type in node_info['node_type_dict']
+    }
+
+    # step 2: the receive and send index
+    receive_idx = tf.placeholder(
+        tf.int32, shape=(None), name='receive_idx'
+    )
+    send_idx = {
+        edge_type: tf.placeholder(
+            tf.int32, shape=(None),
+            name='send_idx_{}'.format(edge_type))
+        for edge_type in node_info['edge_type_list']
+    }
+
+    # step 3: the node type index and inverse node type index
+    node_type_idx = {
+        node_type: tf.placeholder(
+            tf.int32, shape=(None),
+            name='node_type_idx_{}'.format(node_type))
+        for node_type in node_info['node_type_dict']
+    }
+    inverse_node_type_idx = tf.placeholder(
+        tf.int32, shape=(None), name='inverse_node_type_idx'
+    )
+
+    # step 4: the output node index
+    output_type_idx = {
+        output_type: tf.placeholder(
+            tf.int32, shape=(None),
+            name='output_type_idx_{}'.format(output_type)
+        )
+        for output_type in node_info['output_type_dict']
+    }
+    inverse_output_type_idx = tf.placeholder(
+        tf.int32, shape=(None), name='inverse_output_type_idx'
+    )
+
+    # step 5: batch_size
+    batch_size_int = tf.placeholder(
+        tf.int32, shape=(), name='batch_size_int'
+    )
+    return input_obs, input_hidden_state, input_parameters, receive_idx, send_idx, node_type_idx, inverse_node_type_idx, output_type_idx, inverse_output_type_idx, batch_size_int
+
+# def build_network_weights(self):
+#     '''
+#         @brief: build the network
+#         @weights:
+#             _MLP_embedding (1 layer)
+#             _MLP_ob_mapping (1 layer)
+#             _MLP_prop (2 layer)
+#             _MLP_output (2 layer)
+#     '''
+#     # step 1: build the weight parameters (mlp, gru)
+#     with tf.variable_scope(self._name_scope):
+#         # step 1_1: build the embedding matrix (mlp)
+#         # tensor shape (None, para_size) --> (None, input_dim - ob_size)
+#         assert self._input_feat_dim % 2 == 0
+#         if 'noninput' not in self._gnn_embedding_option:
+#             self._MLP_embedding = {
+#                 node_type: nn.MLP(
+#                     [self._input_feat_dim / 2,
+#                      self._node_info['para_size_dict'][node_type]],
+#                     init_method=self._init_method,
+#                     act_func=['tanh'] * 1,  # one layer at most
+#                     add_bias=True,
+#                     scope='MLP_embedding_node_type_{}'.format(node_type)
+#                 )
+#                 for node_type in self._node_info['node_type_dict']
+#                 if self._node_info['ob_size_dict'][node_type] > 0
+#             }
+#             self._MLP_embedding.update({
+#                 node_type: nn.MLP(
+#                     [self._input_feat_dim,
+#                      self._node_info['para_size_dict'][node_type]],
+#                     init_method=self._init_method,
+#                     act_func=['tanh'] * 1,  # one layer at most
+#                     add_bias=True,
+#                     scope='MLP_embedding_node_type_{}'.format(node_type)
+#                 )
+#                 for node_type in self._node_info['node_type_dict']
+#                 if self._node_info['ob_size_dict'][node_type] == 0
+#             })
+#         else:
+#             embedding_vec_size = max(
+#                 np.reshape(
+#                     [max(self._node_info['node_parameters'][i_key])
+#                      for i_key in self._node_info['node_parameters']],
+#                     [-1]
+#                 )
+#             ) + 1
+#             embedding_vec_size = int(embedding_vec_size)
+#             self._embedding_variable = {}
+#
+#             out = self._npr.randn(
+#                 embedding_vec_size, int(self._input_feat_dim / 2)
+#             ).astype(np.float32)
+#             out *= 1.0 / np.sqrt(np.square(out).sum(axis=0, keepdims=True))
+#             self._embedding_variable[False] = tf.Variable(
+#                 out, name='embedding_HALF', trainable=self._trainable
+#             )
+#
+#             if np.any([node_size == 0 for _, node_size
+#                        in self._node_info['ob_size_dict'].items()]):
+#
+#                 out = self._npr.randn(
+#                     embedding_vec_size, self._input_feat_dim
+#                 ).astype(np.float32)
+#                 out *= 1.0 / np.sqrt(np.square(out).sum(axis=0,
+#                                                         keepdims=True))
+#                 self._embedding_variable[True] = tf.Variable(
+#                     out, name='embedding_FULL', trainable=self._trainable
+#                 )
+#
+#         # step 1_2: build the ob mapping matrix (mlp)
+#         # tensor shape (None, para_size) --> (None, input_dim - ob_size)
+#         self._MLP_ob_mapping = {
+#             node_type: nn.MLP(
+#                 [self._input_feat_dim / 2,
+#                  self._node_info['ob_size_dict'][node_type]],
+#                 init_method=self._init_method,
+#                 act_func=['tanh'] * 1,  # one layer at most
+#                 add_bias=True,
+#                 scope='MLP_embedding_node_type_{}'.format(node_type)
+#             )
+#             for node_type in self._node_info['node_type_dict']
+#             if self._node_info['ob_size_dict'][node_type] > 0
+#         }
+#
+#         # step 1_4: build the mlp for the propogation between nodes
+#         MLP_prop_shape = self._network_shape + \
+#             [self._hidden_dim] + [self._hidden_dim]
+#         self._MLP_prop = {
+#             i_edge: nn.MLP(
+#                 MLP_prop_shape,
+#                 init_method=self._init_method,
+#                 act_func=['tanh'] * (len(MLP_prop_shape) - 1),
+#                 add_bias=True,
+#                 scope='MLP_prop_edge_{}'.format(i_edge)
+#             )
+#             for i_edge in self._node_info['edge_type_list']
+#         }
+#
+#         # step 1_5: build the node update function for each node type
+#         if self._node_update_method == 'GRU':
+#             self._Node_update = {
+#                 i_node_type: nn.GRU(
+#                     self._hidden_dim * 2,  # for both the message and ob
+#                     self._hidden_dim,
+#                     init_method=self._init_method,
+#                     scope='GRU_node_{}'.format(i_node_type)
+#                 )
+#                 for i_node_type in self._node_info['node_type_dict']
+#             }
+#         else:
+#             assert False
+#
+#         # step 1_6: the mlp for the mu of the actions
+#         # (l_1, l_2, ..., l_o, l_i)
+#         MLP_out_shape = self._network_shape + \
+#             [self.args.gnn_output_per_node] + [self._hidden_dim]
+#         MLP_out_act_func = ['tanh'] * (len(MLP_out_shape) - 1)
+#         MLP_out_act_func[-1] = None
+#
+#         self._MLP_Out = {
+#             output_type: nn.MLP(
+#                 MLP_out_shape,
+#                 init_method=self._init_method,
+#                 act_func=MLP_out_act_func,
+#                 add_bias=True,
+#                 scope='MLP_out'
+#             )
+#             for output_type in self._node_info['output_type_dict']
+#         }
+#
+#         # step 1_8: build the log std for the actions
+#         self._action_dist_logstd = tf.Variable(
+#             (0.0 * self._npr.randn(1, self._output_size)).astype(
+#                 np.float32
+#             ),
+#             name="policy_logstd",
+#             trainable=self._trainable
+#         )
 
 
 '''
@@ -443,6 +1138,7 @@ def _get_output_info(tree, xml_soup, gnn_output_option):
 '''
 
 # load xml file
+# parse_mujoco_template
 infile = open(xml_path, 'r')
 xml_soup = BeautifulSoup(infile.read(), "html.parser")
 
@@ -476,12 +1172,76 @@ gnn_output_option='shared'
 tree, output_list, output_type_dict, action_size = \
     _get_output_info(tree, xml_soup, gnn_output_option)
 
+# step 5: get the node parameters
+gnn_embedding_option = 'shared'
+node_parameters, para_size_dict = _append_node_parameters(
+    tree, xml_soup, node_type_allowed, gnn_embedding_option
+)
+
+debug_info = {'ob_size': ob_size, 'action_size': action_size}
+
+# step 6: prune the body nodes
+gnn_node_option='nG,yB'
+root_connection_option='nN, Rn, sE'
+if 'nB' in gnn_node_option:
+    tree, relation_matrix, node_type_dict, \
+        input_dict, node_parameters, para_size_dict = \
+        _prune_body_nodes(tree=tree,
+                          relation_matrix=relation_matrix,
+                          node_type_dict=node_type_dict,
+                          input_dict=input_dict,
+                          node_parameters=node_parameters,
+                          para_size_dict=para_size_dict,
+                          root_connection_option=root_connection_option)
+
+# step 7: (optional) uni edge type?
+if 'uE' in root_connection_option:
+    relation_matrix[np.where(relation_matrix != 0)] = 1
+else:
+    if 'sE' not in root_connection_option:
+        print('assert')
+
+node_info = dict(tree=tree,
+            relation_matrix=relation_matrix,
+            node_type_dict=node_type_dict,
+            output_type_dict=output_type_dict,
+            input_dict=input_dict,
+            output_list=output_list,
+            debug_info=debug_info,
+            node_parameters=node_parameters,
+            para_size_dict=para_size_dict,
+            num_nodes=len(tree))
+
+# step 1: check that the input and output size is matched
+is_baseline = False
+# gnn_util.io_size_check(self._input_size, self._output_size, node_info, is_baseline)
+
+# step 2: check for ob size for each node type, construct the node dict
+input_feat_dim=64
+node_info = construct_ob_size_dict(node_info, input_feat_dim)
+
+# step 3: get the inverse node offsets (used to construct gather idx)
+node_info = get_inverse_type_offset(node_info, 'node')
+
+# step 4: get the inverse node offsets (used to gather output idx)
+node_info = get_inverse_type_offset(node_info, 'output')
+
+# step 5: register existing edge and get the receive and send index
+node_info = get_receive_send_idx(node_info)
+
+# prepare the network's input and output
+input_obs, input_hidden_state, input_parameters, receive_idx, send_idx, node_type_idx, inverse_node_type_idx, output_type_idx, inverse_output_type_idx, batch_size_int = prepare_placeholders()
+
+# define the network here
+# build_network_weights()
+# self._build_network_graph()
+
 print('process')
 
-while True:
-    t += 1
-    sim.step()
-    viewer.render()
+# while True:
+#     t += 1
+#     sim.step()
+#     viewer.render()
 
 
 
