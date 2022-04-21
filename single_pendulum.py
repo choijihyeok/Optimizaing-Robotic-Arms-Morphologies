@@ -969,145 +969,405 @@ def prepare_placeholders():
     )
     return input_obs, input_hidden_state, input_parameters, receive_idx, send_idx, node_type_idx, inverse_node_type_idx, output_type_idx, inverse_output_type_idx, batch_size_int
 
-# def build_network_weights(self):
-#     '''
-#         @brief: build the network
-#         @weights:
-#             _MLP_embedding (1 layer)
-#             _MLP_ob_mapping (1 layer)
-#             _MLP_prop (2 layer)
-#             _MLP_output (2 layer)
-#     '''
-#     # step 1: build the weight parameters (mlp, gru)
-#     with tf.variable_scope(self._name_scope):
-#         # step 1_1: build the embedding matrix (mlp)
-#         # tensor shape (None, para_size) --> (None, input_dim - ob_size)
-#         assert self._input_feat_dim % 2 == 0
-#         if 'noninput' not in self._gnn_embedding_option:
-#             self._MLP_embedding = {
-#                 node_type: nn.MLP(
-#                     [self._input_feat_dim / 2,
-#                      self._node_info['para_size_dict'][node_type]],
-#                     init_method=self._init_method,
-#                     act_func=['tanh'] * 1,  # one layer at most
-#                     add_bias=True,
-#                     scope='MLP_embedding_node_type_{}'.format(node_type)
-#                 )
-#                 for node_type in self._node_info['node_type_dict']
-#                 if self._node_info['ob_size_dict'][node_type] > 0
-#             }
-#             self._MLP_embedding.update({
-#                 node_type: nn.MLP(
-#                     [self._input_feat_dim,
-#                      self._node_info['para_size_dict'][node_type]],
-#                     init_method=self._init_method,
-#                     act_func=['tanh'] * 1,  # one layer at most
-#                     add_bias=True,
-#                     scope='MLP_embedding_node_type_{}'.format(node_type)
-#                 )
-#                 for node_type in self._node_info['node_type_dict']
-#                 if self._node_info['ob_size_dict'][node_type] == 0
-#             })
-#         else:
-#             embedding_vec_size = max(
-#                 np.reshape(
-#                     [max(self._node_info['node_parameters'][i_key])
-#                      for i_key in self._node_info['node_parameters']],
-#                     [-1]
-#                 )
-#             ) + 1
-#             embedding_vec_size = int(embedding_vec_size)
-#             self._embedding_variable = {}
-#
-#             out = self._npr.randn(
-#                 embedding_vec_size, int(self._input_feat_dim / 2)
-#             ).astype(np.float32)
-#             out *= 1.0 / np.sqrt(np.square(out).sum(axis=0, keepdims=True))
-#             self._embedding_variable[False] = tf.Variable(
-#                 out, name='embedding_HALF', trainable=self._trainable
-#             )
-#
-#             if np.any([node_size == 0 for _, node_size
-#                        in self._node_info['ob_size_dict'].items()]):
-#
-#                 out = self._npr.randn(
-#                     embedding_vec_size, self._input_feat_dim
-#                 ).astype(np.float32)
-#                 out *= 1.0 / np.sqrt(np.square(out).sum(axis=0,
-#                                                         keepdims=True))
-#                 self._embedding_variable[True] = tf.Variable(
-#                     out, name='embedding_FULL', trainable=self._trainable
-#                 )
-#
-#         # step 1_2: build the ob mapping matrix (mlp)
-#         # tensor shape (None, para_size) --> (None, input_dim - ob_size)
-#         self._MLP_ob_mapping = {
-#             node_type: nn.MLP(
-#                 [self._input_feat_dim / 2,
-#                  self._node_info['ob_size_dict'][node_type]],
-#                 init_method=self._init_method,
-#                 act_func=['tanh'] * 1,  # one layer at most
-#                 add_bias=True,
-#                 scope='MLP_embedding_node_type_{}'.format(node_type)
-#             )
-#             for node_type in self._node_info['node_type_dict']
-#             if self._node_info['ob_size_dict'][node_type] > 0
-#         }
-#
-#         # step 1_4: build the mlp for the propogation between nodes
-#         MLP_prop_shape = self._network_shape + \
-#             [self._hidden_dim] + [self._hidden_dim]
-#         self._MLP_prop = {
-#             i_edge: nn.MLP(
-#                 MLP_prop_shape,
-#                 init_method=self._init_method,
-#                 act_func=['tanh'] * (len(MLP_prop_shape) - 1),
-#                 add_bias=True,
-#                 scope='MLP_prop_edge_{}'.format(i_edge)
-#             )
-#             for i_edge in self._node_info['edge_type_list']
-#         }
-#
-#         # step 1_5: build the node update function for each node type
-#         if self._node_update_method == 'GRU':
-#             self._Node_update = {
-#                 i_node_type: nn.GRU(
-#                     self._hidden_dim * 2,  # for both the message and ob
-#                     self._hidden_dim,
-#                     init_method=self._init_method,
-#                     scope='GRU_node_{}'.format(i_node_type)
-#                 )
-#                 for i_node_type in self._node_info['node_type_dict']
-#             }
-#         else:
-#             assert False
-#
-#         # step 1_6: the mlp for the mu of the actions
-#         # (l_1, l_2, ..., l_o, l_i)
-#         MLP_out_shape = self._network_shape + \
-#             [self.args.gnn_output_per_node] + [self._hidden_dim]
-#         MLP_out_act_func = ['tanh'] * (len(MLP_out_shape) - 1)
-#         MLP_out_act_func[-1] = None
-#
-#         self._MLP_Out = {
-#             output_type: nn.MLP(
-#                 MLP_out_shape,
-#                 init_method=self._init_method,
-#                 act_func=MLP_out_act_func,
-#                 add_bias=True,
-#                 scope='MLP_out'
-#             )
-#             for output_type in self._node_info['output_type_dict']
-#         }
-#
-#         # step 1_8: build the log std for the actions
-#         self._action_dist_logstd = tf.Variable(
-#             (0.0 * self._npr.randn(1, self._output_size)).astype(
-#                 np.float32
-#             ),
-#             name="policy_logstd",
-#             trainable=self._trainable
-#         )
+class MLP(object):
+    """ Multi Layer Perceptron (MLP)
+                Note: the number of layers is N
+
+        Input:
+                dims: a list of N+1 int, number of hidden units (last one is the
+                input dimension)
+                act_func: a list of N activation functions
+                add_bias: a boolean, indicates whether adding bias or not
+                wd: a float, weight decay
+                scope: tf scope of the model
+
+        Output:
+                a function which outputs a list of N tensors, each is the hidden
+                activation of one layer
+    """
+
+    def __init__(self,
+                 dims,
+                 init_method,
+                 act_func=None,
+                 add_bias=True,
+                 wd=None,
+                 dtype=tf.float32,
+                 init_std=None,
+                 scope="MLP",
+                 use_dropout=False):
+
+        self._init_method = init_method
+
+        self._scope = scope
+        self._add_bias = add_bias
+        self._num_layer = len(dims) - 1  # the last one is the input dim
+        self._w = [None] * self._num_layer
+        self._b = [None] * self._num_layer
+        self._act_func = [None] * self._num_layer
+        self._use_dropout = use_dropout
+
+        # initialize variables
+        with tf.variable_scope(scope):
+            for ii in range(self._num_layer):
+                with tf.variable_scope("layer_{}".format(ii)):
+                    dim_in = int(dims[ii - 1])
+                    dim_out = int(dims[ii])
+
+                    self._w[ii] = weight_variable(
+                        [dim_in, dim_out], init_method=self._init_method,
+                        init_para={"mean": 0.0, "stddev": init_std},
+                        wd=wd, name="w", dtype=dtype
+                    )
+
+                    if add_bias:
+                        self._b[ii] = weight_variable(
+                            [dim_out], init_method="constant",
+                            init_para={"val": 1.0e-2},
+                            wd=wd, name="b", dtype=dtype
+                        )
+
+                    if act_func and act_func[ii] is not None:
+                        if act_func[ii] == "relu":
+                            self._act_func[ii] = tf.nn.relu
+                        elif act_func[ii] == "sigmoid":
+                            self._act_func[ii] = tf.sigmoid
+                        elif act_func[ii] == "tanh":
+                            self._act_func[ii] = tf.tanh
+                        else:
+                            raise ValueError("Unsupported activation method!")
+
+    def __call__(self, x, dropout_mask=None):
+        h = [None] * self._num_layer
+
+        with tf.variable_scope(self._scope):
+            for ii in range(self._num_layer):
+                with tf.variable_scope("layer_{}".format(ii)):
+                    if ii == 0:
+                        input_vec = x
+                    else:
+                        input_vec = h[ii - 1]
+
+                    if self._use_dropout:
+                        if dropout_mask is not None:
+                            input_vec = 2 * input_vec * dropout_mask[ii]
+                        else:
+                            input_vec = tf.nn.dropout(
+                                input_vec, 0.5,
+                                name='training_dropout_' + str(ii)
+                            )
+
+                    h[ii] = tf.matmul(input_vec, self._w[ii])
+
+                    if self._add_bias:
+                        h[ii] += self._b[ii]
+
+                    if self._act_func[ii] is not None:
+                        h[ii] = self._act_func[ii](h[ii])
+
+        return h
+
+def weight_variable(shape,
+                    init_method=None,
+                    dtype=tf.float32,
+                    init_para=None,
+                    wd=None,
+                    seed=1234,
+                    name=None,
+                    trainable=True):
+    """ Initialize Weights
+
+        Input:
+                shape: list of int, shape of the weights
+                init_method: string, indicates initialization method
+                init_para: a dictionary,
+                init_val: if it is not None, it should be a tensor
+                wd: a float, weight decay
+                name:
+                trainable:
+
+        Output:
+                var: a TensorFlow Variable
+    """
+
+    if init_method is None:
+        initializer = tf.zeros_initializer(shape, dtype=dtype)
+    elif init_method == "normal":
+        initializer = tf.random_normal_initializer(
+            mean=init_para["mean"],
+            stddev=init_para["stddev"],
+            seed=seed,
+            dtype=dtype
+        )
+    elif init_method == "truncated_normal":
+        initializer = tf.truncated_normal_initializer(
+            mean=init_para["mean"],
+            stddev=init_para["stddev"],
+            seed=seed,
+            dtype=dtype
+        )
+    elif init_method == "uniform":
+        initializer = tf.random_uniform_initializer(
+            minval=init_para["minval"],
+            maxval=init_para["maxval"],
+            seed=seed,
+            dtype=dtype
+        )
+    elif init_method == "constant":
+        initializer = tf.constant_initializer(value=init_para["val"],
+                                              dtype=dtype)
+    elif init_method == "xavier":
+        initializer = tf.contrib.layers.xavier_initializer(
+            uniform=True, seed=seed, dtype=dtype
+        )
+    elif init_method == 'orthogonal':
+        initializer = tf.orthogonal_initializer(
+            gain=1.0, seed=seed, dtype=dtype
+        )
+    else:
+        raise ValueError("Unsupported initialization method!")
+
+    var = tf.Variable(initializer(shape), name=name, trainable=trainable)
+
+    if wd:
+        weight_decay = tf.mul(tf.nn.l2_loss(var), wd, name="weight_decay")
+        tf.add_to_collection("losses", weight_decay)
+
+    return var
+
+
+class GRU(object):
+    """ Gated Recurrent Units (GRU)
+
+        Input:
+                input_dim: input dimension
+                hidden_dim: hidden dimension
+                wd: a float, weight decay
+                scope: tf scope of the model
+
+        Output:
+                a function which computes the output of GRU with one step
+    """
+
+    def __init__(self,
+                 input_dim,
+                 hidden_dim,
+                 init_method,
+                 wd=None,
+                 dtype=tf.float32,
+                 init_std=None,
+                 scope="GRU"):
+
+        self._init_method = init_method
+
+        # initialize variables
+        with tf.variable_scope(scope):
+            self._w_xi = weight_variable(
+                [input_dim, hidden_dim], init_method=self._init_method,
+                init_para={"mean": 0.0, "stddev": init_std},
+                wd=wd, name="w_xi", dtype=dtype
+            )
+            self._w_hi = weight_variable(
+                [hidden_dim, hidden_dim], init_method=self._init_method,
+                init_para={"mean": 0.0, "stddev": init_std},
+                wd=wd, name="w_hi", dtype=dtype
+            )
+            self._b_i = weight_variable(
+                [hidden_dim], init_method="constant",
+                init_para={"val": 0.0}, wd=wd, name="b_i", dtype=dtype
+            )
+
+            self._w_xr = weight_variable(
+                [input_dim, hidden_dim], init_method=self._init_method,
+                init_para={"mean": 0.0, "stddev": init_std},
+                wd=wd, name="w_xr", dtype=dtype
+            )
+            self._w_hr = weight_variable(
+                [hidden_dim, hidden_dim], init_method=self._init_method,
+                init_para={"mean": 0.0, "stddev": init_std},
+                wd=wd, name="w_hr", dtype=dtype
+            )
+            self._b_r = weight_variable(
+                [hidden_dim], init_method="constant", init_para={"val": 0.0},
+                wd=wd, name="b_r", dtype=dtype
+            )
+
+            self._w_xu = weight_variable(
+                [input_dim, hidden_dim], init_method=self._init_method,
+                init_para={"mean": 0.0, "stddev": init_std},
+                wd=wd, name="w_xu", dtype=dtype
+            )
+            self._w_hu = weight_variable(
+                [hidden_dim, hidden_dim], init_method=self._init_method,
+                init_para={"mean": 0.0, "stddev": init_std},
+                wd=wd, name="w_hu", dtype=dtype
+            )
+            self._b_u = weight_variable(
+                [hidden_dim], init_method="constant", init_para={"val": 0.0},
+                wd=wd, name="b_u", dtype=dtype
+            )
+
+    def __call__(self, x, state, is_batch_mul=False):
+        # update gate
+        g_i = tf.sigmoid(
+            tf.matmul(x, self._w_xi) + tf.matmul(state, self._w_hi) + self._b_i
+        )
+
+        # reset gate
+        g_r = tf.sigmoid(
+            tf.matmul(x, self._w_xr) + tf.matmul(state, self._w_hr) + self._b_r
+        )
+
+        # new memory implementation 1
+        u = tf.tanh(
+            tf.matmul(x, self._w_xu) + tf.matmul(g_r * state, self._w_hu) +
+            self._b_u
+        )
+
+        # hidden state
+        new_state = state * g_i + u * (1 - g_i)
+
+        return new_state
+
+def build_network_weights():
+    '''
+        @brief: build the network
+        @weights:
+            _MLP_embedding (1 layer)
+            _MLP_ob_mapping (1 layer)
+            _MLP_prop (2 layer)
+            _MLP_output (2 layer)
+    '''
+    # step 1: build the weight parameters (mlp, gru)
+    with tf.variable_scope(self._name_scope):
+        # step 1_1: build the embedding matrix (mlp)
+        # tensor shape (None, para_size) --> (None, input_dim - ob_size)
+        if self._input_feat_dim % 2 != 0: print("assert")
+        if 'noninput' not in self._gnn_embedding_option:
+            self._MLP_embedding = {
+                node_type: MLP(
+                    [self._input_feat_dim / 2,
+                     self._node_info['para_size_dict'][node_type]],
+                    init_method=self._init_method,
+                    act_func=['tanh'] * 1,  # one layer at most
+                    add_bias=True,
+                    scope='MLP_embedding_node_type_{}'.format(node_type)
+                )
+                for node_type in self._node_info['node_type_dict']
+                if self._node_info['ob_size_dict'][node_type] > 0
+            }
+            self._MLP_embedding.update({
+                node_type: MLP(
+                    [self._input_feat_dim,
+                     self._node_info['para_size_dict'][node_type]],
+                    init_method=self._init_method,
+                    act_func=['tanh'] * 1,  # one layer at most
+                    add_bias=True,
+                    scope='MLP_embedding_node_type_{}'.format(node_type)
+                )
+                for node_type in self._node_info['node_type_dict']
+                if self._node_info['ob_size_dict'][node_type] == 0
+            })
+        else:
+            embedding_vec_size = max(
+                np.reshape(
+                    [max(self._node_info['node_parameters'][i_key])
+                     for i_key in self._node_info['node_parameters']],
+                    [-1]
+                )
+            ) + 1
+            embedding_vec_size = int(embedding_vec_size)
+            self._embedding_variable = {}
+
+            out = self._npr.randn(
+                embedding_vec_size, int(self._input_feat_dim / 2)
+            ).astype(np.float32)
+            out *= 1.0 / np.sqrt(np.square(out).sum(axis=0, keepdims=True))
+            self._embedding_variable[False] = tf.Variable(
+                out, name='embedding_HALF', trainable=self._trainable
+            )
+
+            if np.any([node_size == 0 for _, node_size
+                       in self._node_info['ob_size_dict'].items()]):
+
+                out = self._npr.randn(
+                    embedding_vec_size, self._input_feat_dim
+                ).astype(np.float32)
+                out *= 1.0 / np.sqrt(np.square(out).sum(axis=0,
+                                                        keepdims=True))
+                self._embedding_variable[True] = tf.Variable(
+                    out, name='embedding_FULL', trainable=self._trainable
+                )
+
+        # step 1_2: build the ob mapping matrix (mlp)
+        # tensor shape (None, para_size) --> (None, input_dim - ob_size)
+        self._MLP_ob_mapping = {
+            node_type: MLP(
+                [self._input_feat_dim / 2,
+                 self._node_info['ob_size_dict'][node_type]],
+                init_method=self._init_method,
+                act_func=['tanh'] * 1,  # one layer at most
+                add_bias=True,
+                scope='MLP_embedding_node_type_{}'.format(node_type)
+            )
+            for node_type in self._node_info['node_type_dict']
+            if self._node_info['ob_size_dict'][node_type] > 0
+        }
+
+        # step 1_4: build the mlp for the propogation between nodes
+        MLP_prop_shape = self._network_shape + \
+            [self._hidden_dim] + [self._hidden_dim]
+        self._MLP_prop = {
+            i_edge: MLP(
+                MLP_prop_shape,
+                init_method=self._init_method,
+                act_func=['tanh'] * (len(MLP_prop_shape) - 1),
+                add_bias=True,
+                scope='MLP_prop_edge_{}'.format(i_edge)
+            )
+            for i_edge in self._node_info['edge_type_list']
+        }
+
+        # step 1_5: build the node update function for each node type
+        if self._node_update_method == 'GRU':
+            self._Node_update = {
+                i_node_type: GRU(
+                    self._hidden_dim * 2,  # for both the message and ob
+                    self._hidden_dim,
+                    init_method=self._init_method,
+                    scope='GRU_node_{}'.format(i_node_type)
+                )
+                for i_node_type in self._node_info['node_type_dict']
+            }
+        else:
+            assert False
+
+        # step 1_6: the mlp for the mu of the actions
+        # (l_1, l_2, ..., l_o, l_i)
+        MLP_out_shape = self._network_shape + \
+            [self.args.gnn_output_per_node] + [self._hidden_dim]
+        MLP_out_act_func = ['tanh'] * (len(MLP_out_shape) - 1)
+        MLP_out_act_func[-1] = None
+
+        self._MLP_Out = {
+            output_type: MLP(
+                MLP_out_shape,
+                init_method=self._init_method,
+                act_func=MLP_out_act_func,
+                add_bias=True,
+                scope='MLP_out'
+            )
+            for output_type in self._node_info['output_type_dict']
+        }
+
+        # step 1_8: build the log std for the actions
+        self._action_dist_logstd = tf.Variable(
+            (0.0 * self._npr.randn(1, self._output_size)).astype(
+                np.float32
+            ),
+            name="policy_logstd",
+            trainable=self._trainable
+        )
 
 
 '''
@@ -1238,10 +1498,10 @@ input_obs, input_hidden_state, input_parameters, receive_idx, send_idx, node_typ
 
 print('process')
 
-# while True:
-#     t += 1
-#     sim.step()
-#     viewer.render()
+while True:
+    t += 1
+    sim.step()
+    viewer.render()
 
 
 
