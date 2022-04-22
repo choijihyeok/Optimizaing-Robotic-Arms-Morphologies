@@ -1229,6 +1229,26 @@ class GRU(object):
 
         return new_state
 
+# parameters for build_network_weights
+name_scope = 'evolutionary_agent_policy'
+input_feat_dim = 64
+gnn_embedding_option = 'shared'
+MLP_embedding = None
+init_method = init_methods='orthogonal'
+agent_id = 0
+seed = 0
+npr = np.random.RandomState(seed + agent_id)
+trainable = True
+network_shape = [64, 64]
+node_update_method = 'GRU'
+Node_update = None
+gnn_output_per_node = 3
+output_size = 1
+MLP_ob_mapping = None
+MLP_prop = None
+MLP_Out = None
+action_dist_logstd = None
+
 def build_network_weights():
     '''
         @brief: build the network
@@ -1239,136 +1259,241 @@ def build_network_weights():
             _MLP_output (2 layer)
     '''
     # step 1: build the weight parameters (mlp, gru)
-    with tf.variable_scope(self._name_scope):
+    with tf.variable_scope(name_scope):
         # step 1_1: build the embedding matrix (mlp)
         # tensor shape (None, para_size) --> (None, input_dim - ob_size)
-        if self._input_feat_dim % 2 != 0: print("assert")
-        if 'noninput' not in self._gnn_embedding_option:
-            self._MLP_embedding = {
+        if input_feat_dim % 2 != 0: print("assert")
+        if 'noninput' not in gnn_embedding_option:
+            MLP_embedding = {
                 node_type: MLP(
-                    [self._input_feat_dim / 2,
-                     self._node_info['para_size_dict'][node_type]],
-                    init_method=self._init_method,
+                    [input_feat_dim / 2,
+                     node_info['para_size_dict'][node_type]],
+                    init_method=init_method,
                     act_func=['tanh'] * 1,  # one layer at most
                     add_bias=True,
                     scope='MLP_embedding_node_type_{}'.format(node_type)
                 )
-                for node_type in self._node_info['node_type_dict']
-                if self._node_info['ob_size_dict'][node_type] > 0
+                for node_type in node_info['node_type_dict']
+                if node_info['ob_size_dict'][node_type] > 0
             }
-            self._MLP_embedding.update({
+            MLP_embedding.update({
                 node_type: MLP(
-                    [self._input_feat_dim,
-                     self._node_info['para_size_dict'][node_type]],
-                    init_method=self._init_method,
+                    [input_feat_dim,
+                     node_info['para_size_dict'][node_type]],
+                    init_method=init_method,
                     act_func=['tanh'] * 1,  # one layer at most
                     add_bias=True,
                     scope='MLP_embedding_node_type_{}'.format(node_type)
                 )
-                for node_type in self._node_info['node_type_dict']
-                if self._node_info['ob_size_dict'][node_type] == 0
+                for node_type in node_info['node_type_dict']
+                if node_info['ob_size_dict'][node_type] == 0
             })
         else:
             embedding_vec_size = max(
                 np.reshape(
-                    [max(self._node_info['node_parameters'][i_key])
-                     for i_key in self._node_info['node_parameters']],
+                    [max(node_info['node_parameters'][i_key])
+                     for i_key in node_info['node_parameters']],
                     [-1]
                 )
             ) + 1
             embedding_vec_size = int(embedding_vec_size)
-            self._embedding_variable = {}
+            embedding_variable = {}
 
-            out = self._npr.randn(
-                embedding_vec_size, int(self._input_feat_dim / 2)
+            out = npr.randn(
+                embedding_vec_size, int(input_feat_dim / 2)
             ).astype(np.float32)
             out *= 1.0 / np.sqrt(np.square(out).sum(axis=0, keepdims=True))
-            self._embedding_variable[False] = tf.Variable(
-                out, name='embedding_HALF', trainable=self._trainable
+            embedding_variable[False] = tf.Variable(
+                out, name='embedding_HALF', trainable=trainable
             )
 
             if np.any([node_size == 0 for _, node_size
-                       in self._node_info['ob_size_dict'].items()]):
+                       in node_info['ob_size_dict'].items()]):
 
-                out = self._npr.randn(
-                    embedding_vec_size, self._input_feat_dim
+                out = npr.randn(
+                    embedding_vec_size, input_feat_dim
                 ).astype(np.float32)
                 out *= 1.0 / np.sqrt(np.square(out).sum(axis=0,
                                                         keepdims=True))
-                self._embedding_variable[True] = tf.Variable(
-                    out, name='embedding_FULL', trainable=self._trainable
+                embedding_variable[True] = tf.Variable(
+                    out, name='embedding_FULL', trainable=trainable
                 )
 
         # step 1_2: build the ob mapping matrix (mlp)
         # tensor shape (None, para_size) --> (None, input_dim - ob_size)
-        self._MLP_ob_mapping = {
+        MLP_ob_mapping = {
             node_type: MLP(
-                [self._input_feat_dim / 2,
-                 self._node_info['ob_size_dict'][node_type]],
-                init_method=self._init_method,
+                [input_feat_dim / 2,
+                 node_info['ob_size_dict'][node_type]],
+                init_method=init_method,
                 act_func=['tanh'] * 1,  # one layer at most
                 add_bias=True,
                 scope='MLP_embedding_node_type_{}'.format(node_type)
             )
-            for node_type in self._node_info['node_type_dict']
-            if self._node_info['ob_size_dict'][node_type] > 0
+            for node_type in node_info['node_type_dict']
+            if node_info['ob_size_dict'][node_type] > 0
         }
 
         # step 1_4: build the mlp for the propogation between nodes
-        MLP_prop_shape = self._network_shape + \
-            [self._hidden_dim] + [self._hidden_dim]
-        self._MLP_prop = {
+        MLP_prop_shape = network_shape + \
+            [hidden_dim] + [hidden_dim]
+        MLP_prop = {
             i_edge: MLP(
                 MLP_prop_shape,
-                init_method=self._init_method,
+                init_method=init_method,
                 act_func=['tanh'] * (len(MLP_prop_shape) - 1),
                 add_bias=True,
                 scope='MLP_prop_edge_{}'.format(i_edge)
             )
-            for i_edge in self._node_info['edge_type_list']
+            for i_edge in node_info['edge_type_list']
         }
 
         # step 1_5: build the node update function for each node type
-        if self._node_update_method == 'GRU':
-            self._Node_update = {
+        if node_update_method == 'GRU':
+            Node_update = {
                 i_node_type: GRU(
-                    self._hidden_dim * 2,  # for both the message and ob
-                    self._hidden_dim,
-                    init_method=self._init_method,
+                    hidden_dim * 2,  # for both the message and ob
+                    hidden_dim,
+                    init_method=init_method,
                     scope='GRU_node_{}'.format(i_node_type)
                 )
-                for i_node_type in self._node_info['node_type_dict']
+                for i_node_type in node_info['node_type_dict']
             }
         else:
             assert False
 
         # step 1_6: the mlp for the mu of the actions
         # (l_1, l_2, ..., l_o, l_i)
-        MLP_out_shape = self._network_shape + \
-            [self.args.gnn_output_per_node] + [self._hidden_dim]
+        MLP_out_shape = network_shape + \
+            [gnn_output_per_node] + [hidden_dim]
         MLP_out_act_func = ['tanh'] * (len(MLP_out_shape) - 1)
         MLP_out_act_func[-1] = None
 
-        self._MLP_Out = {
+        MLP_Out = {
             output_type: MLP(
                 MLP_out_shape,
-                init_method=self._init_method,
+                init_method=init_method,
                 act_func=MLP_out_act_func,
                 add_bias=True,
                 scope='MLP_out'
             )
-            for output_type in self._node_info['output_type_dict']
+            for output_type in node_info['output_type_dict']
         }
 
         # step 1_8: build the log std for the actions
-        self._action_dist_logstd = tf.Variable(
-            (0.0 * self._npr.randn(1, self._output_size)).astype(
+        action_dist_logstd = tf.Variable(
+            (0.0 * npr.randn(1, output_size)).astype(
                 np.float32
             ),
             name="policy_logstd",
-            trainable=self._trainable
+            trainable=trainable
+        )
+    return MLP_embedding, None, MLP_ob_mapping, MLP_prop, Node_update, MLP_Out, action_dist_logstd
+
+def build_network_graph():
+    current_hidden_state = self._build_input_graph()
+
+    # step 3: unroll the propogation
+    self._action_mu_output = []  # [nstep, None, n_action_size]
+
+    for tt in xrange(self._nstep):
+        current_input_feat = self._input_feat_list[tt]
+        self._prop_msg = []
+        for ee, i_edge_type in enumerate(self._node_info['edge_type_list']):
+            node_activate = \
+                tf.gather(
+                    current_input_feat,
+                    self._send_idx[i_edge_type],
+                    name='edge_id_{}_prop_steps_{}'.format(i_edge_type, tt)
+                )
+            self._prop_msg.append(
+                self._MLP_prop[i_edge_type](node_activate)[-1]
+            )
+
+        # aggregate messages
+        concat_msg = tf.concat(self._prop_msg, 0)
+        self.concat_msg = concat_msg
+        message = tf.unsorted_segment_sum(
+            concat_msg, self._receive_idx,
+            self._node_info['num_nodes'] * self._batch_size_int
         )
 
+        denom_const = tf.unsorted_segment_sum(
+            tf.ones_like(concat_msg), self._receive_idx,
+            self._node_info['num_nodes'] * self._batch_size_int
+        )
+        message = tf.div(message, (denom_const + tf.constant(1.0e-10)))
+        node_update_input = tf.concat([message, current_input_feat], axis=1,
+                                      name='ddbug' + str(tt))
+
+        # update the hidden states via GRU
+        new_state = []
+        for i_node_type in self._node_info['node_type_dict']:
+            new_state.append(
+                self._Node_update[i_node_type](
+                    tf.gather(
+                        node_update_input,
+                        self._node_type_idx[i_node_type],
+                        name='GRU_message_node_type_{}_prop_step_{}'.format(
+                            i_node_type, tt
+                        )
+                    ),
+                    tf.gather(
+                        current_hidden_state,
+                        self._node_type_idx[i_node_type],
+                        name='GRU_feat_node_type_{}_prop_steps_{}'.format(
+                            i_node_type, tt
+                        )
+                    )
+                )
+            )
+        self.output_hidden_state = {
+            node_type: new_state[i_id]
+            for i_id, node_type
+            in enumerate(self._node_info['node_type_dict'])
+        }
+        new_state = tf.concat(new_state, 0)  # BTW, the order is wrong
+        # now, get the orders back
+        current_hidden_state = tf.gather(
+            new_state, self._inverse_node_type_idx,
+            name='get_order_back_gather_prop_steps_{}'.format(tt)
+        )
+
+        # self._action_mu_output = []  # [nstep, None, n_action_size]
+        action_mu_output = []
+        for output_type in self._node_info['output_type_dict']:
+            action_mu_output.append(
+                self._MLP_Out[output_type](
+                    tf.gather(
+                        current_hidden_state,
+                        self._output_type_idx[output_type],
+                        name='output_type_{}'.format(output_type)
+                    )
+                )[-1]
+            )
+
+        action_mu_output = tf.concat(action_mu_output, 0)
+        action_mu_output = tf.gather(
+            action_mu_output,
+            self._inverse_output_type_idx,
+            name='output_inverse'
+        )
+
+        action_mu_output = tf.reshape(action_mu_output,
+                                      [self._batch_size_int, -1])
+        self._action_mu_output.append(action_mu_output)
+
+    self._action_mu_output = tf.reshape(
+        tf.concat(self._action_mu_output, axis=1), [-1, self._output_size]
+    )
+    # step 4: build the log std for the actions
+    self._action_dist_logstd_param = tf.reshape(
+        tf.tile(
+            tf.reshape(self._action_dist_logstd, [1, 1, self._output_size],
+                       name='test'),
+            [self._nstep, self._batch_size_int, 1]
+        ), [-1, self._output_size]
+    )
 
 '''
     @brief:
@@ -1493,8 +1618,9 @@ node_info = get_receive_send_idx(node_info)
 input_obs, input_hidden_state, input_parameters, receive_idx, send_idx, node_type_idx, inverse_node_type_idx, output_type_idx, inverse_output_type_idx, batch_size_int = prepare_placeholders()
 
 # define the network here
-# build_network_weights()
-# self._build_network_graph()
+MLP_embedding, embedding_variable, MLP_ob_mapping, MLP_prop, Node_update, MLP_Out, action_dist_logstd = build_network_weights()
+
+build_network_graph()
 
 print('process')
 
