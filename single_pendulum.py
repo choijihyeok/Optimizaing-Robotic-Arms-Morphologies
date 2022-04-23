@@ -1390,37 +1390,142 @@ def build_network_weights():
         )
     return MLP_embedding, None, MLP_ob_mapping, MLP_prop, Node_update, MLP_Out, action_dist_logstd
 
+input_embedding = None
+embedding_variable = None
+ob_feat = None
+input_feat = None
+nstep = 1
+input_feat_list = None
+
+
+def build_input_graph():
+    if 'noninput' not in gnn_embedding_option:
+        input_embedding = {
+            node_type: MLP_embedding[node_type](
+                input_parameters[node_type]
+            )[-1]
+            for node_type in node_info['node_type_dict']
+        }
+    else:
+        input_embedding = {
+            node_type: tf.gather(
+                embedding_variable[
+                    node_info['ob_size_dict'][node_type] == 0
+                ],
+                tf.reshape(input_parameters[node_type], [-1])
+            )
+            for node_type in node_info['node_type_dict']
+        }
+
+    # shape: [n_step, node_num, embedding_size + ob_size]
+    ob_feat = {
+        node_type: MLP_ob_mapping[node_type](
+            input_obs[node_type]
+        )[-1]
+        for node_type in node_info['node_type_dict']
+        if node_info['ob_size_dict'][node_type] > 0
+    }
+    ob_feat.update({
+        node_type: input_obs[node_type]
+        for node_type in node_info['node_type_dict']
+        if node_info['ob_size_dict'][node_type] == 0
+    })
+
+    input_feat = {
+        node_type: tf.concat([
+            tf.reshape(
+                input_embedding[node_type],
+                [-1, nstep *
+                 len(node_info['node_type_dict'][node_type]),
+                 int(input_feat_dim / 2)],
+            ),
+            tf.reshape(
+                ob_feat[node_type],
+                [-1, nstep *
+                 len(node_info['node_type_dict'][node_type]),
+                 int(input_feat_dim / 2)],
+            )
+        ], axis=2)
+        for node_type in node_info['node_type_dict']
+    }
+
+    split_feat_list = {
+        node_type: tf.split(
+            input_feat[node_type],
+            nstep,
+            axis=1,
+            name='split_into_nstep' + node_type
+        )
+        for node_type in node_info['node_type_dict']
+    }
+    feat_list = []
+    for i_step in range(nstep):
+        # for node_type in self._node_info['node_type_dict']:
+        feat_list.append(
+            tf.concat(
+                [tf.reshape(split_feat_list[node_type][i_step],
+                            [-1, input_feat_dim])
+                 for node_type in node_info['node_type_dict']],
+                axis=0  # the node
+            )
+        )
+    input_feat_list = [
+        tf.gather(  # get node order into graph order
+            i_step_data,
+            inverse_node_type_idx,
+            name='get_order_back_gather_init' + str(i_step),
+        )
+        for i_step, i_step_data in enumerate(feat_list)
+    ]
+
+    current_hidden_state = tf.concat(
+        [input_hidden_state[node_type]
+         for node_type in node_info['node_type_dict']],
+        axis=0
+    )
+    current_hidden_state = tf.gather(  # get node order into graph order
+        current_hidden_state,
+        inverse_node_type_idx,
+        name='get_order_back_gather_init'
+    )
+    return current_hidden_state, input_feat_list
+
+concat_msg = None
+batch_size_int = None
+inverse_node_type_idx = None
+
+
 def build_network_graph():
-    current_hidden_state = self._build_input_graph()
+    current_hidden_state, input_feat_list = build_input_graph()
 
     # step 3: unroll the propogation
-    self._action_mu_output = []  # [nstep, None, n_action_size]
+    action_mu_output_lst = []  # [nstep, None, n_action_size]
 
-    for tt in xrange(self._nstep):
-        current_input_feat = self._input_feat_list[tt]
-        self._prop_msg = []
-        for ee, i_edge_type in enumerate(self._node_info['edge_type_list']):
+    for tt in range(nstep):
+        current_input_feat = input_feat_list[tt]
+        prop_msg = []
+        for ee, i_edge_type in enumerate(node_info['edge_type_list']):
             node_activate = \
                 tf.gather(
                     current_input_feat,
-                    self._send_idx[i_edge_type],
+                    send_idx[i_edge_type],
                     name='edge_id_{}_prop_steps_{}'.format(i_edge_type, tt)
                 )
-            self._prop_msg.append(
-                self._MLP_prop[i_edge_type](node_activate)[-1]
+            prop_msg.append(
+                MLP_prop[i_edge_type](node_activate)[-1]
             )
 
         # aggregate messages
-        concat_msg = tf.concat(self._prop_msg, 0)
-        self.concat_msg = concat_msg
+        concat_msg = tf.concat(prop_msg, 0)
+        # self.concat_msg = concat_msg
         message = tf.unsorted_segment_sum(
-            concat_msg, self._receive_idx,
-            self._node_info['num_nodes'] * self._batch_size_int
+            concat_msg, receive_idx,
+            node_info['num_nodes'] * batch_size_int
         )
 
         denom_const = tf.unsorted_segment_sum(
-            tf.ones_like(concat_msg), self._receive_idx,
-            self._node_info['num_nodes'] * self._batch_size_int
+            tf.ones_like(concat_msg), receive_idx,
+            node_info['num_nodes'] * batch_size_int
         )
         message = tf.div(message, (denom_const + tf.constant(1.0e-10)))
         node_update_input = tf.concat([message, current_input_feat], axis=1,
@@ -1428,45 +1533,45 @@ def build_network_graph():
 
         # update the hidden states via GRU
         new_state = []
-        for i_node_type in self._node_info['node_type_dict']:
+        for i_node_type in node_info['node_type_dict']:
             new_state.append(
-                self._Node_update[i_node_type](
+                Node_update[i_node_type](
                     tf.gather(
                         node_update_input,
-                        self._node_type_idx[i_node_type],
+                        node_type_idx[i_node_type],
                         name='GRU_message_node_type_{}_prop_step_{}'.format(
                             i_node_type, tt
                         )
                     ),
                     tf.gather(
                         current_hidden_state,
-                        self._node_type_idx[i_node_type],
+                        node_type_idx[i_node_type],
                         name='GRU_feat_node_type_{}_prop_steps_{}'.format(
                             i_node_type, tt
                         )
                     )
                 )
             )
-        self.output_hidden_state = {
+        output_hidden_state = {
             node_type: new_state[i_id]
             for i_id, node_type
-            in enumerate(self._node_info['node_type_dict'])
+            in enumerate(node_info['node_type_dict'])
         }
         new_state = tf.concat(new_state, 0)  # BTW, the order is wrong
         # now, get the orders back
         current_hidden_state = tf.gather(
-            new_state, self._inverse_node_type_idx,
+            new_state, inverse_node_type_idx,
             name='get_order_back_gather_prop_steps_{}'.format(tt)
         )
 
         # self._action_mu_output = []  # [nstep, None, n_action_size]
         action_mu_output = []
-        for output_type in self._node_info['output_type_dict']:
+        for output_type in node_info['output_type_dict']:
             action_mu_output.append(
-                self._MLP_Out[output_type](
+                MLP_Out[output_type](
                     tf.gather(
                         current_hidden_state,
-                        self._output_type_idx[output_type],
+                        output_type_idx[output_type],
                         name='output_type_{}'.format(output_type)
                     )
                 )[-1]
@@ -1475,25 +1580,26 @@ def build_network_graph():
         action_mu_output = tf.concat(action_mu_output, 0)
         action_mu_output = tf.gather(
             action_mu_output,
-            self._inverse_output_type_idx,
+            inverse_output_type_idx,
             name='output_inverse'
         )
 
         action_mu_output = tf.reshape(action_mu_output,
-                                      [self._batch_size_int, -1])
-        self._action_mu_output.append(action_mu_output)
+                                      [batch_size_int, -1])
+        action_mu_output_lst.append(action_mu_output)
 
-    self._action_mu_output = tf.reshape(
-        tf.concat(self._action_mu_output, axis=1), [-1, self._output_size]
+    action_mu_output_lst = tf.reshape(
+        tf.concat(action_mu_output_lst, axis=1), [-1, output_size]
     )
     # step 4: build the log std for the actions
-    self._action_dist_logstd_param = tf.reshape(
+    action_dist_logstd_param = tf.reshape(
         tf.tile(
-            tf.reshape(self._action_dist_logstd, [1, 1, self._output_size],
+            tf.reshape(action_dist_logstd, [1, 1, output_size],
                        name='test'),
-            [self._nstep, self._batch_size_int, 1]
-        ), [-1, self._output_size]
+            [nstep, batch_size_int, 1]
+        ), [-1, output_size]
     )
+    return action_mu_output_lst, action_dist_logstd_param
 
 '''
     @brief:
@@ -1620,7 +1726,7 @@ input_obs, input_hidden_state, input_parameters, receive_idx, send_idx, node_typ
 # define the network here
 MLP_embedding, embedding_variable, MLP_ob_mapping, MLP_prop, Node_update, MLP_Out, action_dist_logstd = build_network_weights()
 
-build_network_graph()
+action_mu_output, action_dist_logstd_param = build_network_graph()
 
 print('process')
 
