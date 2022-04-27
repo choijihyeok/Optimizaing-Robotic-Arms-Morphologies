@@ -1601,6 +1601,9 @@ def build_network_graph():
     )
     return action_mu_output_lst, action_dist_logstd_param
 
+
+
+
 '''
     @brief:
         get the tree of "geom", "body", "joint" built up.
@@ -1627,6 +1630,15 @@ def build_network_graph():
         @output_list: This correspond to the id of the node where a output
             is available
 '''
+# build session
+session = None
+use_gpu = 0
+if use_gpu:
+    config = tf.ConfigProto(device_count={'GPU': 1})
+else:
+    config = tf.ConfigProto(device_count={'GPU': 0})
+config.gpu_options.allow_growth = True  # don't take full gpu memory
+session = tf.Session(config=config)
 
 # load xml file
 # parse_mujoco_template
@@ -1728,12 +1740,20 @@ MLP_embedding, embedding_variable, MLP_ob_mapping, MLP_prop, Node_update, MLP_Ou
 
 action_mu_output, action_dist_logstd_param = build_network_graph()
 
-print('process')
+# get the variable list ready
+# collect the tf variable and the trainable tf variable
+trainable_var_list = [var for var in tf.trainable_variables()
+                                    if name_scope in var.name]
 
-while True:
-    t += 1
-    sim.step()
-    viewer.render()
+all_var_list = [var for var in tf.global_variables()
+                              if name_scope in var.name]
+
+print('process')
+# print(tree)
+# while True:
+#     t += 1
+#     sim.step()
+#     viewer.render()
 
 
 
