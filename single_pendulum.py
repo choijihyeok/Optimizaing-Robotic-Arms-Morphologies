@@ -103,6 +103,9 @@ GEOM_TYPE_ENCODE = {
 }
 
 xml_path = "single_pendulum.xml"
+xml_path2 = "double_pendulum.xml"
+xml_path3 = "swimmer.xml"
+xml_path = xml_path3
 model = load_model_from_path(xml_path)
 sim = MjSim(model)
 
@@ -1665,6 +1668,19 @@ tree, relation_matrix = _append_tendon_relation(tree,
                                                 relation_matrix,
                                                 xml_soup)
 
+import matplotlib.pyplot as plt
+
+plotMatrix = np.array(relation_matrix)
+fig, ax = plt.subplots()
+ax.matshow(plotMatrix, cmap=plt.cm.Blues)
+for i in range(len(plotMatrix)):
+    for j in range(len(plotMatrix[0])):
+        c = plotMatrix[j, i]
+        ax.text(i, j, str(c), va='center', ha='center')
+plt.title('Relation Matrix')
+plt.show()
+# plt.savefig('relationMatrix.png')
+
 # step 3: get the input list ready
 # task_name is specific xml model.
 task_name = 'Humanoid-v1'
@@ -1735,6 +1751,37 @@ node_info = get_receive_send_idx(node_info)
 # prepare the network's input and output
 input_obs, input_hidden_state, input_parameters, receive_idx, send_idx, node_type_idx, inverse_node_type_idx, output_type_idx, inverse_output_type_idx, batch_size_int = prepare_placeholders()
 
+# Visualization Graph
+import networkx as nx
+import torch
+import torch_geometric
+from matplotlib import pyplot as plt
+
+# changeing send, receive index to list
+send_idx_list = []
+receive_idx_list = list(node_info['receive_idx'])
+for key, value in node_info['send_idx'].items():
+    send_idx_list.extend(value)
+print('send:',send_idx_list)
+print('recv:', receive_idx_list)
+# Graph connectivity [2, num_edges]
+edge_index = torch.tensor([send_idx_list,
+                           receive_idx_list])
+# Node feature
+# x = torch.tensor([[3], [4], [5]])
+# Labels
+labels = {}
+for i in range(node_info['num_nodes']):
+    labels[i] = i
+data = torch_geometric.data.Data(edge_index=edge_index)
+g = torch_geometric.utils.to_networkx(data, to_undirected=True)
+nx.draw(g, with_labels=True, node_size=100, alpha=1, linewidths=10, labels=labels)
+plt.show()
+# plt.savefig('graph.png')
+
+
+
+
 # define the network here
 MLP_embedding, embedding_variable, MLP_ob_mapping, MLP_prop, Node_update, MLP_Out, action_dist_logstd = build_network_weights()
 
@@ -1749,7 +1796,8 @@ all_var_list = [var for var in tf.global_variables()
                               if name_scope in var.name]
 
 print('process')
-# print(tree)
+
+# print(node_info['tree'])
 # while True:
 #     t += 1
 #     sim.step()
