@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Created on Thu Mar 31 18:58:55 2022
-
-@author: leonast
-"""
 
 
 from mujoco_py import load_model_from_path, MjSim, MjViewer
@@ -105,7 +100,10 @@ GEOM_TYPE_ENCODE = {
 xml_path = "single_pendulum.xml"
 xml_path2 = "double_pendulum.xml"
 xml_path3 = "swimmer.xml"
-xml_path = xml_path3
+xml_path4 = "half_cheetah.xml"
+xml_path5 = "hopper.xml"
+
+xml_path = xml_path5
 model = load_model_from_path(xml_path)
 sim = MjSim(model)
 
@@ -1795,13 +1793,1696 @@ trainable_var_list = [var for var in tf.trainable_variables()
 all_var_list = [var for var in tf.global_variables()
                               if name_scope in var.name]
 
+
+
+# making species information for hopper.
+
+# root infomation of creature
+CREATURE_ROOT_INFO = {
+    'fish': {
+        'geom_type': -1,
+        'u': -1,
+        'v': -1,
+        'axis_x': -233,
+        'axis_y': -233,
+        'a_size': 0.01,
+        'b_size': 0.08,
+        'c_size': 0.04,
+        'joint_range': 60
+    },
+    'walker': {
+        'geom_type': -1,
+        'u': -1,
+        'v': -1,
+        'axis_x': -233,
+        'axis_y': -233,
+        'a_size': 0.07,
+        'b_size': 0.3,
+        'c_size': 233,
+        'joint_range': 60
+    },
+    'hopper': {
+        'geom_type': -1,
+        'u': -1,
+        'v': -1,
+        'axis_x': -233,
+        'axis_y': -233,
+        'a_size': 0.0653,
+        'b_size': 0.1025,
+        'c_size': 0.03,
+        'joint_range': 60
+    },
+    'cheetah': {
+        'geom_type': -1,
+        'u': -1,
+        'v': -1,
+        'axis_x': -233,
+        'axis_y': -233,
+        'a_size': 0.046,
+        'b_size': 0.5,
+        'c_size': 0.03,
+        'joint_range': 60
+    }
+}
+
+# attributes of creature
+CREATURE_ORIGINAL_ATTR = {
+    'fish': [
+        # tail1
+        {
+            'u': 3 * np.pi / 2,
+            'v': np.pi / 2,
+            'axis_x': -0.99,
+            'axis_y': 1e-16,
+            'a_size': 0.001,
+            'b_size': 0.008,
+            'c_size': 0.016,
+            'joint_range': 30,
+            'geom_type': 0
+        },
+        # tail2
+        {
+            'u': np.pi / 2,
+            'v': np.pi / 2,
+            'axis_x': 0.99,
+            'axis_y': 1e-16,
+            'a_size': 0.001,
+            'b_size': 0.018,
+            'c_size': 0.035,
+            'joint_range': 30,
+            'geom_type': 0   # the original attribute is defined using stiffness
+        },
+        # left fin
+        {
+            'u': np.pi,
+            'v': np.pi / 2,
+            'axis_x': 1e-16,
+            'axis_y': 0.99,
+            'a_size': 0.02,
+            'b_size': 0.015,
+            'c_size': 0.001,
+            'joint_range': 30,
+            'geom_type': 0 # the original attribute is defined using tendon
+        },
+        # right fin
+        {
+            'u': 0,
+            'v': np.pi / 2,
+            'axis_x': 1e-16,
+            'axis_y': -0.99,
+            'a_size': 0.02,
+            'b_size': 0.015,
+            'c_size': 0.001,
+            'joint_range': 30,
+            'geom_type': 0
+        }
+    ],
+    'walker': [
+        # left thigh
+        # NOTE: left and right thigh should be symmetric
+        {
+            'u': 4 * np.pi / 9,
+            'v': np.pi,
+            'axis_x': -1,
+            'axis_y': -1,
+            'a_size': 0.05,
+            'b_size': 0.225,
+            'c_size': 40,
+            'joint_range': 30,
+            'geom_type': 0
+        },
+        {
+            'u': 2 * np.pi,
+            'v': np.pi,
+            'axis_x': -1,
+            'axis_y': -1,
+            'a_size': 0.04,
+            'b_size': 0.25,
+            'c_size': 40,
+            'joint_range': 30,
+            'geom_type': 0
+        },
+        {
+            'u': 0,
+            'v': np.pi,
+            'axis_x': -1,
+            'axis_y': -1,
+            'a_size': 0.05,
+            'b_size': 0.08,
+            'c_size': 40,
+            'joint_range': 30,
+            'geom_type': 0
+        }
+    ],
+    'hopper': [
+        {
+            'u': np.pi,
+            'v': np.pi,
+            'axis_x': -1,
+            'axis_y': -1,
+            'a_size': 0.065,
+            'b_size': 0.075,
+            'c_size': 30,
+            'joint_range': 30,
+            'geom_type': 0
+        },
+        {
+            'u': 0,
+            'v': np.pi,
+            'axis_x': -1,
+            'axis_y': -1,
+            'a_size': 0.04,
+            'b_size': 0.165,
+            'c_size': 30,
+            'joint_range': 30,
+            'geom_type': 0
+        },
+        {
+            'u': 2 * np.pi,
+            'v': np.pi,
+            'axis_x': -1,
+            'axis_y': -1,
+            'a_size': 0.03,
+            'b_size': 0.16,
+            'c_size': 30,
+            'joint_range': 30,
+            'geom_type': 0
+        },
+        {
+            'u': 0,
+            'v': np.pi,
+            'axis_x': -1,
+            'axis_y': -1,
+            'a_size': 0.04,
+            'b_size': 0.09,
+            'c_size': 30,
+            'joint_range': 30,
+            'geom_type': 0
+        }
+    ],
+    'cheetah': [
+        {# back thigh
+            'u': -4 * np.pi / 9,
+            'v': np.pi,
+            'axis_x': -1,
+            'axis_y': -1,
+            'a_size': 0.046,
+            'b_size': 0.145,
+            'c_size': 120,
+            'joint_range': 30,
+            'geom_type': 0
+        },
+        {# back shin
+            'u': 2 * np.pi,
+            'v': np.pi,
+            'axis_x': -1,
+            'axis_y': -1,
+            'a_size': 0.046,
+            'b_size': 0.15,
+            'c_size': 90,
+            'joint_range': 30,
+            'geom_type': 0
+        },
+        {# back foot
+            'u': -4 * np.pi / 9,
+            'v': np.pi,
+            'axis_x': -1,
+            'axis_y': -1,
+            'a_size': 0.046,
+            'b_size': 0.15,
+            'c_size': 60,
+            'joint_range': 30,
+            'geom_type': 0
+        },
+        {# front thigh
+            'u': 2 * np.pi,
+            'v': np.pi,
+            'axis_x': 1,
+            'axis_y': -1,
+            'a_size': 0.046,
+            'b_size': 0.145,
+            'c_size': 90,
+            'joint_range': 30,
+            'geom_type': 0
+        },
+        {# front shin
+            'u': 0,
+            'v': np.pi,
+            'axis_x': 1,
+            'axis_y': -1,
+            'a_size': 0.046,
+            'b_size': 0.106,
+            'c_size': 60,
+            'joint_range': 30,
+            'geom_type': 0
+        },
+        {# front foot
+            'u': 7 * 2 * np.pi / 9,
+            'v': np.pi,
+            'axis_x': 1,
+            'axis_y': -1,
+            'a_size': 0.046,
+            'b_size': 0.07,
+            'c_size': 30,
+            'joint_range': 30,
+            'geom_type': 0
+        }
+    ]
+}
+
+CREATURE_HARD_CONSTRAINT = {
+    'fish': {
+        'u': (1e-9, 2*np.pi),
+        'v': (1e-9,   np.pi),
+        'axis_x': (-1, 1),
+        'axis_y': (-1, 1),
+        'a_size': (0.002, 0.03),
+        'b_size': (0.002, 0.03),
+        'c_size': (0.002, 0.03),
+        'joint_range': (30, 120)
+    },
+    'walker': {
+        'u': (1e-9, 2*np.pi),
+        'v': (1e-9,   np.pi),
+        'axis_x': (-1, 1),
+        'axis_y': (-1, 1),
+        'a_size': (0.03, 0.07),
+        'b_size': (0.1, 0.3),
+        'c_size': (30, 40), # c_size server as the value for gear
+        'joint_range': (30, 90)
+    },
+    'hopper': {
+        'u': (1e-9, 2*np.pi),
+        'v': (1e-9,   np.pi),
+        'axis_x': (-1, 1),
+        'axis_y': (-1, 1),
+        'a_size': (0.03, 0.07),
+        'b_size': (0.010, 0.035),
+        'c_size': (0.002, 0.03),
+        'joint_range': (30, 120)
+    },
+    'cheetah': {
+        'u': (1e-9, 2*np.pi),
+        'v': (1e-9,   np.pi),
+        'axis_x': (-1, 1),
+        'axis_y': (-1, 1),
+        'a_size': (0.002, 0.03),
+        'b_size': (0.03, 0.15),
+        'c_size': (30, 120),
+        'joint_range': (30, 120)
+    }
+}
+
+
+# making node and tree
+
+
+class Node:
+    def __init__(self, node_id, attr):
+        self.id = node_id
+        self.attr = attr
+        self.child_list = []
+
+    def get_all_descendents(self):
+        '''
+        '''
+        all_nodes = []
+        p_queue = [self]
+        while len(p_queue) != 0:
+            node = p_queue.pop(0)
+            for c_node in node.get_child_list():
+                p_queue.append(c_node)
+
+            all_nodes.append(node)
+
+        return all_nodes
+    def get_all_node_id(self):
+        ''' return a list of node_ids that are part of the node-defined
+        subtree
+        NOTE: this method returns the node in breadth first search (BFS) order!
+        '''
+        # get all descendents list
+        all_nodes = self.get_all_descendents()
+        all_id_list = [x.get_node_id() for x in all_nodes]
+
+        # add its own id
+        # all_id_list = [self.get_node_id()] + all_descendents_id
+        return all_id_list
+
+    def is_same_size(self, other_node):
+        ''' return true if the two nodes have the same
+        'a_size', 'b_size', 'c_size' in its attribute
+        '''
+        if np.abs(self.attr['a_size'] - \
+            other_node.get_attr()['a_size']) > 1e-7:
+            return False
+        if np.abs(self.attr['b_size'] - \
+            other_node.get_attr()['b_size']) > 1e-7:
+            return False
+        if np.abs(self.attr['c_size'] - \
+            other_node.get_attr()['c_size']) > 1e-7:
+            return False
+        return True
+
+    def set_id(self, new_id):
+        '''
+        '''
+        self.id = new_id
+        return new_id + 1
+
+    def add_child(self, node):
+        self.child_list.append(node)
+
+    def get_child_list(self):
+        return self.child_list
+
+    def get_node_id(self):
+        return self.id
+
+    def get_attr(self):
+        return self.attr
+
+    def set_attr(self, new_attr):
+        self.attr = new_attr
+        return
+
+    def gen_test_node_attr(self, task='fish', node_num=5, discrete_rv=True):
+        '''
+        '''
+
+        def get_uniform(low, high, discrete=True, total_lvl=6, avoid_zero=True):
+            ''' uniformly sample from [low, high]
+            if given discrete, it will sample from [low, high] at total_lvl
+            steps
+            '''
+            assert total_lvl > 0, 'Invalid number of step %d' % total_lvl
+
+            if discrete:
+                step = (high - low) / total_lvl
+                val = low + step * random.randint(1, total_lvl)
+            else:
+                val = float(np.random.uniform(low, high, 1))
+
+            if avoid_zero:
+                val += 1e-9
+            return val
+
+        def root_default(task):
+            root_attr = {}
+
+            if 'fish' in task:
+                # trivial information that shouldn't be used
+                root_attr['geom_type'] = -1
+                root_attr['u'] = -1
+                root_attr['v'] = -1
+                root_attr['axis_x'] = -1
+                root_attr['axis_y'] = -1
+                # this is the default value as in dm_control original repo
+                root_attr['a_size'] = 0.0075
+                root_attr['b_size'] = 0.06
+                root_attr['c_size'] = root_attr['a_size'] * 4
+                #
+                root_attr['joint_range'] = 60
+            elif 'walker' in task:
+                # some trivial attributes
+                root_attr['geom_type'] = -1
+                root_attr['u'] = -1
+                root_attr['v'] = -1
+                root_attr['axis_x'] = -1
+                root_attr['axis_y'] = -1
+                root_attr['joint_range'] = 60
+                # setting the torso, using ellipsoid to approximate cylinder
+                root_attr['a_size'] = 0.07
+                root_attr['b_size'] = 0.3
+                root_attr['c_size'] = -1
+            elif 'hopper' in task:
+                root_attr = CREATURE_ROOT_INFO['hopper']
+            elif 'cheetah' in task:
+                root_attr = CREATURE_ROOT_INFO['cheetah']
+            else:
+                assert 0, 'task: %s, not supported' % task
+
+            return root_attr
+
+        def gen_one_attr(task, discrete_rv=True):
+            '''
+            '''
+            node_attr = {}
+
+            # define geom type
+            node_attr['geom_type'] = random.randint(0, 0)
+
+            if 'fish' in task:
+                constraint = CREATURE_HARD_CONSTRAINT['fish']
+                needed_attr = ['u', 'v', 'axis_x', 'axis_y',
+                               'a_size', 'b_size', 'c_size', 'joint_range']
+                for item in needed_attr:
+                    low, high = constraint[item]
+                    node_attr[item] = get_uniform(
+                        low, high, discrete=discrete_rv
+                    )
+                    if item == 'joint_range':
+                        node_attr[item] = int(node_attr[item])
+
+            elif 'walker' in task:
+                constraint = CREATURE_HARD_CONSTRAINT['walker']
+                needed_attr = ['u', 'v', 'axis_x', 'axis_y',
+                               'a_size', 'b_size', 'c_size', 'joint_range']
+                for item in needed_attr:
+                    low, high = constraint[item]
+                    node_attr[item] = get_uniform(
+                        low, high, discrete=discrete_rv
+                    )
+                    if item == 'joint_range':
+                        node_attr[item] = int(node_attr[item])
+
+            elif 'hopper' in task:
+                constraint = CREATURE_HARD_CONSTRAINT['hopper']
+                needed_attr = ['u', 'v', 'axis_x', 'axis_y',
+                               'a_size', 'b_size', 'c_size', 'joint_range']
+                for item in needed_attr:
+                    low, high = constraint[item]
+                    node_attr[item] = get_uniform(
+                        low, high, discrete=discrete_rv
+                    )
+                    if item == 'joint_range':
+                        node_attr[item] = int(node_attr[item])
+            elif 'cheetah' in task:
+                constraint = CREATURE_HARD_CONSTRAINT['walker']
+                needed_attr = ['u', 'v', 'axis_x', 'axis_y',
+                               'a_size', 'b_size', 'c_size', 'joint_range']
+                for item in needed_attr:
+                    low, high = constraint[item]
+                    node_attr[item] = get_uniform(
+                        low, high, discrete=discrete_rv
+                    )
+                    if item == 'joint_range':
+                        node_attr[item] = int(node_attr[item])
+
+            return node_attr
+
+        node_attr_list = []
+        for i in range(node_num):
+            node_attr = gen_one_attr(task, discrete_rv=discrete_rv)
+            node_attr_list.append(node_attr)
+
+        node_attr_list[0] = root_default(task)
+        return node_attr_list
+
+    def make_symmetric(self, task='fish', discrete=True):
+        ''' make the symmetric node w.r.t the self node
+        symmetric node and return the new node
+        '''
+        new_attr = self.gen_test_node_attr(
+            task=task,
+            node_num=2,
+            discrete_rv=discrete
+        )[-1]
+
+        same_attr = ['a_size', 'b_size', 'c_size', 'geom_type',
+                     'joint_range']
+        for item in same_attr:
+            new_attr[item] = self.attr[item]
+
+        # set certain attributes
+        new_attr['u'] = np.pi - self.attr['u']
+        while new_attr['u'] < 0: new_attr['u'] += 2 * np.pi
+        new_attr['v'] = self.attr['v']
+        new_attr['axis_x'] = -self.attr['axis_x']
+        new_attr['axis_y'] = self.attr['axis_y']
+
+        # create the new node
+        new_node = Node(-1, new_attr)
+
+        return new_node
+
+def node_count(node, counter_start=0):
+    ''' count the number of nodes in a tree
+    '''
+    total_num = counter_start
+    parent_list = [node]
+    while len(parent_list) != 0:
+        node = parent_list.pop(0)
+        child_list = node.get_child_list()
+        for child in child_list:
+            parent_list.append(child)
+
+        total_num = node.set_id(total_num)
+    return total_num
+
+class Tree:
+    def __init__(self, node=None):
+        self.root = node
+        self.total_num = 0
+        self.total_num = node_count(self.root, self.total_num)
+
+    def add_sub_tree(self, parent, child):
+        ''' add the child (a node containing subtree)
+        to the parent's child_list
+        return: list of id values that is assigned to child
+        '''
+        # traverse child's subtree and update the id
+        prev_node_num = self.total_num
+        self.total_num = node_count(child, self.total_num)
+        parent.add_child(child)
+
+        return list(range(prev_node_num, self.total_num))
+
+    def remove_sub_tree(self, parent, child):
+        ''' remove the parent child relationship
+        '''
+        # figure out the place child within parent's child list
+        child_list = parent.get_child_list()
+        child_id_list = [item.get_node_id() for item in child_list]
+        try:
+            idx = child_id_list.index(child.get_node_id())
+        except:
+            raise RuntimeError('child doesn\'t exist in parent')
+        child_list.pop(idx)
+        self.total_num = 0
+        self.total_num = node_count(self.root, self.total_num)
+        return
+
+    def sample_node(self, p=0.5):
+        ''' randomly sample a node
+        '''
+
+        def check_node(node, p=0.5):
+            if np.random.binomial(1, p) == 1:
+                return node
+            res = None
+            for child in node.child_list:
+                res = check_node(child)
+                if res is not None: return res
+            return res
+
+        # WARNING:
+        # this method has different weights for nodes at different depth
+        # sample_node = None
+        # while sample_node is None:
+        #     sample_node = check_node(self.root, p=p)
+        all_nodes = self.get_all_nodes()
+        sample_node = random.choice(all_nodes)
+
+        return sample_node
+
+    def get_all_nodes(self):
+        ''' return all the nodes in the tree
+        (order is not guaranteed)
+        '''
+        all_nodes = []
+        node_list = [self.root]
+        while len(node_list) != 0:
+            node = node_list.pop(0)
+            for c_node in node.get_child_list():
+                node_list.append(c_node)
+            all_nodes.append(node)
+        return all_nodes
+
+    def get_pc_relation(self):
+        ''' return a list of strings '%d-%d'
+        meaning parent-child connection
+        '''
+        pc_rel = []
+        p_node_list = [self.root]
+        while len(p_node_list) != 0:
+            p_node = p_node_list.pop(0)
+            for c_node in p_node.get_child_list():
+                p_id = p_node.get_node_id()
+                c_id = c_node.get_node_id()
+                rel = '%d-%d' % (p_id, c_id)
+                pc_rel.append(rel)
+                p_node_list.append(c_node)
+        return pc_rel
+
+    def mirror_mat(self, mat):
+        ''' input:  1. numpy array matrix of N x N size
+            output: 1. matrix of N x N size
+                       keep the other half of the original mat
+                       and make it symmetric along the diagonal line
+        '''
+        N, _ = mat.shape
+        assert N == _, 'Not a square matrix, it cannot be symmetric!'
+
+        for i in range(N):
+            for j in range(i, N):
+                mat[j, i] = mat[i, j]
+        return mat
+
+    def to_mujoco_format(self):
+        ''' create the 1. adj_mat
+                       2. node_attr
+        to get ready for model_gen
+        '''
+        N = self.total_num
+
+        pc_relation = self.get_pc_relation()
+        all_nodes = self.get_all_nodes()
+
+        # generate the adj_matrix
+        adj_mat = np.zeros((N, N))
+        for rel in pc_relation:
+            i, j = rel.split('-')
+            i, j = int(i), int(j)
+            adj_mat[i, j] = 1
+        adj_mat = self.mirror_mat(adj_mat)
+        adj_mat[adj_mat > 0] = 7
+
+        # generate the attributes
+        sorted_nodes = sorted(all_nodes, key=lambda x: x.get_node_id())
+        node_attr = [item.get_attr() for item in sorted_nodes]
+        return adj_mat.astype('int'), node_attr
+
+
+
+# generate xml hopper structure
+from lxml import etree
+import random
+
+def hopper_xml_generator(adj_matrix, node_attr, options=None, filename=None):
+    ''' generate xml for hopper
+    '''
+
+    def get_encoding(val):
+        ''' from a value (0-7) to binary one-hot encoding
+        eg. input 6
+            output [1, 1, 0]
+        '''
+        onehot = [int(item) for item in list(bin(val)[2:])]
+        onehot = [0 for i in range(3 - len(onehot))] + onehot
+        onehot = list(reversed(onehot))
+        return onehot
+
+
+
+    def add_mujoco_header(root):
+        incl_1 = etree.Element('include', file='./common/skybox.xml')
+        incl_2 = etree.Element('include', file='./common/visual.xml')
+        incl_3 = etree.Element('include', file='./common/materials.xml')
+        root.append(incl_1)
+        root.append(incl_2)
+        root.append(incl_3)
+        return root
+
+    def add_mujoco_options(root, options):
+        # similar to walker but the attribute value is different
+        option = etree.Element('option', timestep='0.005')
+        statistic = etree.Element('statistic', extent='2', center='0 0 0.5')
+        root.append(option)
+        root.append(statistic)
+
+        # default
+        default_sec = etree.Element('default')
+
+        # default 1: hopper class
+        default_1 = etree.fromstring('<default class="hopper"></default>')
+        default_1_joint = etree.Element('joint', type='hinge',
+                                        axis='0 1 0', limited='true', damping='0.05', armature='.2'
+                                        )
+        default_1_geom = etree.Element('geom', type='capsule', material='self')
+        default_1_site = etree.Element('site', type='sphere', size='0.05', group='3')
+        default_1.append(default_1_joint)
+        default_1.append(default_1_geom)
+        default_1.append(default_1_site)
+
+        default_2 = etree.fromstring('<default class="free"></default>')
+        default_2_joint = etree.Element('joint', limited='false', damping='0',
+                                        armature='0', stiffness='0'
+                                        )
+        default_2.append(default_2_joint)
+
+        default_motor = etree.Element('motor', ctrlrange='-1 1', ctrllimited='true')
+
+        default_sec.append(default_1)
+        default_sec.append(default_2)
+        default_sec.append(default_motor)
+
+        root.append(default_sec)
+        return root
+
+    def add_worldbody(root, adj_matrix, node_attr_list):
+        '''
+        '''
+
+        def worldbody_preliminary(worldbody):
+            '''
+            '''
+            geom = etree.Element('geom', name='floor', type='plane',
+                                 conaffinity='1', pos='48 0 0', size='50 1 .2', material='grid'
+                                 )
+            worldbody.append(geom)
+
+            camera1 = etree.Element('camera', name='cam0',
+                                    pos='0 -2.8 0.8', euler='90 0 0',
+                                    mode='trackcom'
+                                    )
+            camera2 = etree.Element('camera', name='back',
+                                    pos='-2 -.2 1.2', xyaxes='0.2 -1 0 .5 0 2',
+                                    mode='trackcom'
+                                    )
+            worldbody.append(camera1)
+            worldbody.append(camera2)
+
+            return worldbody
+
+        def torso_preliminary(torso):
+            light = etree.Element('light', name='top', pos='0 0 2', mode='trackcom')
+            torso.append(light)
+
+            joint_x = etree.fromstring('<joint name="rootx" type="slide" axis="1 0 0" class="free"/>')
+            joint_y = etree.fromstring('<joint name="rooty" type="hinge" axis="0 1 0" class="free"/>')
+            joint_z = etree.fromstring('<joint name="rootz" type="slide" axis="0 0 1" class="free"/>')
+            torso.append(joint_x)
+            torso.append(joint_z)
+            torso.append(joint_y)
+
+            geom1 = etree.Element('geom', name='torso', fromto='0 0 -.05 0 0 .2', size='0.0653')
+            geom2 = etree.Element('geom', name='nose', fromto='.08 0 .13 .15 0 .14', size='0.03')
+            torso.append(geom1)
+            torso.append(geom2)
+
+            return torso
+
+        ########### START OF PARSING THE WORLDBODY ###########
+        # this part should be identical to that of walker
+        worldbody = etree.Element('worldbody')
+        worldbody = worldbody_preliminary(worldbody)
+
+        # parse the matrix
+        N, _ = adj_matrix.shape
+
+        body_dict = {}
+        info_dict = {}  # log the needed information given a node
+
+        # the root of the model is always fixed
+        body_root = etree.Element('body', name='torso', pos='0 0 1',
+                                  childclass='hopper')
+        body_root = torso_preliminary(body_root)
+        root_info = {}
+
+        root_info['a_size'] = node_attr_list[0]['a_size']
+        root_info['b_size'] = node_attr_list[0]['b_size']
+        root_info['c_size'] = node_attr_list[0]['c_size']
+        # for determining the center of the capsule relative to the body joint
+        root_info['center_rel_pos'] = 0
+
+        info_dict[0] = root_info
+        body_dict[0] = body_root
+
+        # initilize the parent list to go throught the entire matrix
+        parent_list = [0]
+        while len(parent_list) != 0:
+            parent_node = parent_list.pop(0)
+
+            parent_row = np.copy(adj_matrix[parent_node])
+            for i in range(parent_node + 1): parent_row[i] = 0
+            child_list = np.where(parent_row)[0].tolist()
+
+            while True:
+
+                try:
+                    child_node = child_list.pop(0)
+                except:
+                    break
+
+                # parent-child relationship
+                # print('P-C relationship:', parent_node, child_node)
+                node_attr = node_attr_list[child_node]
+                node_name = 'node-%d' % (child_node)
+
+                # this is parent's ellipsoid information
+                parent_info = info_dict[parent_node]
+                a_parent = parent_info['a_size']
+                b_parent = parent_info['b_size']
+                c_parent = parent_info['c_size']
+                center_rel_pos = parent_info['center_rel_pos']
+
+                # getting node attributes from the list
+                u = node_attr['u']  # using these 2 values for determining the range
+                v = node_attr['v']  # of the joint
+
+                axis_x = node_attr['axis_x']  # used to determine the relative position
+                axis_y = node_attr['axis_y']  # w.r.t the parent capsule
+
+                a_child = node_attr['a_size']  # using this as the capsule radius
+                b_child = node_attr['b_size']  # using this as the capsule h
+                c_child = node_attr['c_size']
+
+                # compute the translational and rotational matrix
+                child_info = {}
+
+                # store attributes that defines the child's geom
+                child_info['a_size'] = a_child
+                child_info['b_size'] = b_child
+                child_info['c_size'] = c_child
+
+                # set the stitching point relative to parent
+                a = min([node_attr['axis_x'], node_attr['axis_y']])
+                b = max([node_attr['axis_x'], node_attr['axis_y']])
+                stitch_ratio = node_attr['axis_x'] / 1
+
+                if not (stitch_ratio <= 1.01 and stitch_ratio >= -1.01):
+                    import pdb;
+                    pdb.set_trace()
+                stitch_pt = b_parent * stitch_ratio + center_rel_pos
+                body_pos = '0 0 %f' % (stitch_pt)
+
+                # body translation
+                if node_attr['axis_x'] * node_attr['axis_y'] >= 0:
+                    geom_pos = '0 0 -%f' % (b_child)
+                    child_info['center_rel_pos'] = -b_child
+                else:
+                    geom_pos = '0 0 %f' % (b_child)
+                    child_info['center_rel_pos'] = b_child
+
+                joint_pos = '0 0 0'
+
+                # now create the body
+                body_child = etree.Element('body', name=node_name, pos=body_pos)
+
+                # add geom
+                geom_type = 2  # for all planar creates, we use capsule
+                capsule_size = '%f %f' % (a_child, b_child)
+                geom = etree.Element('geom', name=node_name, pos=geom_pos, size=capsule_size)
+                body_child.append(geom)
+
+                # add joints
+                joint_type = adj_matrix[parent_node, child_node]
+                joint_axis = get_encoding(joint_type)
+                joint_range = node_attr['joint_range']
+                range1 = node_attr['u'] / (2.0 * np.pi) * -90
+                range2 = node_attr['v'] / (1.0 * np.pi) * 150 + 1
+                range2 = range1 + 90 + 1
+                if joint_axis[0] == 1:
+                    x_joint = etree.fromstring("<joint name='%d-%d_x' axis='0 -1 0' pos='%s' range='%d %d'/>" % \
+                                               (parent_node, child_node, joint_pos, range1, range2))
+                    body_child.append(x_joint)
+                if joint_axis[1] == 1:
+                    y_joint = etree.fromstring("<joint name='%d-%d_y' axis='0 -1 0' pos='%s' range='%d %d'/>" % \
+                                               (parent_node, child_node, joint_pos, range1, range2))
+                    body_child.append(y_joint)
+                if joint_axis[2] == 1:
+                    z_joint = etree.fromstring("<joint name='%d-%d_z' axis='0 -1 0' pos='%s' range='%d %d'/>" % \
+                                               (parent_node, child_node, joint_pos, range1, range2))
+                    body_child.append(z_joint)
+
+                site1_pos = '0 0 0'
+                site2_pos = '0 0 %f' % (2 * child_info['center_rel_pos'])
+                site1 = etree.Element('site', name='touch1-%s' % (node_name), pos=site1_pos)
+                site2 = etree.Element('site', name='touch2-%s' % (node_name), pos=site2_pos)
+                body_child.append(site1)
+                body_child.append(site2)
+
+                # logging the information
+                body_dict[parent_node].append(body_child)
+                body_dict[child_node] = body_child  # register child's body struct in case it has child
+                info_dict[child_node] = child_info
+                # child becomes the parent for further examination
+                parent_list.append(child_node)
+
+        worldbody.append(body_dict[0])
+        root.append(worldbody)
+        return root
+
+    def dfs_order2(adj_mat):
+        '''
+            return the order of parent-child relationship in the tree structure
+            described by the adj_matrix
+            input:
+                1. adj_mat an N x N matrix in which index 0 is the root
+                2. the matrix is symmetric
+            output:
+                1. a list of '%d-%d's decribing the order of parent-child relationship
+                   run using dfs
+        '''
+
+        def dfs_order_helper(adj_mat, node_id, cur_order):
+            '''
+            '''
+            # get child_list
+            node_row = np.copy(adj_mat[node_id])
+            for i in range(node_id + 1): node_row[i] = 0
+            child_list = np.where(node_row)[0].tolist()
+
+            for child_node in child_list:
+                edge = '%d-%d' % (node_id, child_node)
+                cur_order.append(edge)
+                dfs_order_helper(adj_mat, child_node, cur_order)
+
+            return cur_order
+
+        # using recursion to solve the problem
+        dfs_order = []
+        dfs_order = dfs_order_helper(adj_mat, 0, dfs_order)
+        return dfs_order
+
+    def add_mujoco_sensor(root, adj_matrix):
+        ''' this is specific for planar creature
+        the body parts need to be informed with their collision with the ground
+        '''
+
+        dfs_order = dfs_order2(adj_matrix)
+        node_order = [0] + [int(item.split('-')[-1]) for item in dfs_order]
+
+        sensor = etree.Element('sensor')
+
+        for i in range(1, len(node_order)):
+            node_name = 'node-%d' % (i)
+
+            site1 = etree.Element('touch', name='touch1-%s' % (node_name),
+                                  site='touch1-%s' % (node_name)
+                                  )
+            site2 = etree.Element('touch', name='touch2-%s' % (node_name),
+                                  site='touch2-%s' % (node_name)
+                                  )
+            sensor.append(site1)
+            sensor.append(site2)
+
+        root.append(sensor)
+        return root
+
+    def add_mujoco_actuator(root, adj_matrix):
+        ''' this part should be exactly the same as walker
+        '''
+        dfs_order = dfs_order2(adj_matrix)
+        actuator = etree.Element('actuator')
+
+        for edge in dfs_order:
+
+            p, c = [int(x) for x in edge.split('-')]
+
+            joint_type = adj_matrix[p, c]
+            joint_axis = get_encoding(joint_type)
+            edges = []
+            if joint_axis[0] == 1:
+                edge_x = '%s_x' % edge
+                edges.append(edge_x)
+            elif joint_axis[1] == 1:
+                edge_y = '%s_y' % edge
+                edges.append(edge_y)
+            elif joint_axis[2] == 1:
+                edge_z = '%s_z' % edge
+                edges.append(edge_z)
+
+            positions = [etree.Element('motor', name=item, joint=item, gear='30')
+                         for item in edges]
+            for item in positions: actuator.append(item)
+        root.append(actuator)
+        return root
+
+    ################## Actual codes for generating hopper ##################
+
+    root = etree.Element('mujoco', model='planar hopper')
+    root = add_mujoco_header(root)
+    root = add_mujoco_options(root, options)
+    root = add_worldbody(root, adj_matrix, node_attr)
+    root = add_mujoco_sensor(root, adj_matrix)
+    root = add_mujoco_actuator(root, adj_matrix)
+
+    if filename is not None:
+        tree = etree.ElementTree(root)
+        tree.write('./assets/gen' + filename + '.xml',
+                   pretty_print=True,
+                   xml_declaration=True, encoding='utf-8'
+                   )
+    return root
+
+from copy import deepcopy
+
+# making species
+class Species:
+    '''
+    '''
+
+    def __init__(self,
+                 body_num=3,
+                 discrete=True,
+                 allow_hierarchy=True,
+                 filter_ratio=0.5):
+        # filter ratio
+        # self.args = args
+        self.p = 0.5
+        self.allow_hierarchy = True
+        self.discrete = True
+        self.mutation_add_ratio = 0.2
+        self.mutation_delete_ratio = 0.2
+        self.self_cross_ratio = 0.0
+        self.force_symmetric = False
+
+        # if args.optimize_creature == False:
+        #     # set up the tree (if no starting species is specified)
+        #     r_node = Node(0,
+        #                   model_gen.gen_test_node_attr(task=args.task, node_num=2, discrete_rv=discrete)[0]
+        #                   )
+        #     self.struct_tree = Tree(r_node)
+        #
+        #     if 'walker' in self.args.task:
+        #         while len(self.struct_tree.get_root().get_all_descendents()) <= \
+        #                 body_num:
+        #             self.perturb_add(no_selfcross=True)
+        #     else:
+        #         for i in range(1, body_num):
+        #             if self.args.force_symmetric:
+        #                 node_list = self.generate_one_node()
+        #             else:
+        #                 node_list = self.generate_one_node(only_one=True)
+        #             for c_node in node_list:
+        #                 self.struct_tree.add_sub_tree(r_node, c_node)
+        # else:
+        # if 'fish' in args.task:
+        #     self.struct_tree = Tree(get_original_fish())
+        #
+        # elif 'walker' in args.task:
+        #     self.struct_tree = Tree(get_original_walker())
+        #
+        # elif 'cheetah' in args.task:
+        #     self.struct_tree = Tree(get_original_cheetah())
+
+        # if 'hopper' in args.task:
+        self.struct_tree = Tree(get_original_hopper())
+
+        return None
+
+    def gen_test_node_attr(self, task='fish', node_num=5, discrete_rv=True):
+        '''
+        '''
+
+        def get_uniform(low, high, discrete=True, total_lvl=6, avoid_zero=True):
+            ''' uniformly sample from [low, high]
+            if given discrete, it will sample from [low, high] at total_lvl
+            steps
+            '''
+            assert total_lvl > 0, 'Invalid number of step %d' % total_lvl
+
+            if discrete:
+                step = (high - low) / total_lvl
+                val = low + step * random.randint(1, total_lvl)
+            else:
+                val = float(np.random.uniform(low, high, 1))
+
+            if avoid_zero:
+                val += 1e-9
+            return val
+
+        def root_default(task):
+            root_attr = {}
+
+            if 'fish' in task:
+                # trivial information that shouldn't be used
+                root_attr['geom_type'] = -1
+                root_attr['u'] = -1
+                root_attr['v'] = -1
+                root_attr['axis_x'] = -1
+                root_attr['axis_y'] = -1
+                # this is the default value as in dm_control original repo
+                root_attr['a_size'] = 0.0075
+                root_attr['b_size'] = 0.06
+                root_attr['c_size'] = root_attr['a_size'] * 4
+                #
+                root_attr['joint_range'] = 60
+            elif 'walker' in task:
+                # some trivial attributes
+                root_attr['geom_type'] = -1
+                root_attr['u'] = -1
+                root_attr['v'] = -1
+                root_attr['axis_x'] = -1
+                root_attr['axis_y'] = -1
+                root_attr['joint_range'] = 60
+                # setting the torso, using ellipsoid to approximate cylinder
+                root_attr['a_size'] = 0.07
+                root_attr['b_size'] = 0.3
+                root_attr['c_size'] = -1
+            elif 'hopper' in task:
+                root_attr = CREATURE_ROOT_INFO['hopper']
+            elif 'cheetah' in task:
+                root_attr = CREATURE_ROOT_INFO['cheetah']
+            else:
+                assert 0, 'task: %s, not supported' % task
+
+            return root_attr
+
+        def gen_one_attr(task, discrete_rv=True):
+            '''
+            '''
+            node_attr = {}
+
+            # define geom type
+            node_attr['geom_type'] = random.randint(0, 0)
+
+            if 'fish' in task:
+                constraint = CREATURE_HARD_CONSTRAINT['fish']
+                needed_attr = ['u', 'v', 'axis_x', 'axis_y',
+                               'a_size', 'b_size', 'c_size', 'joint_range']
+                for item in needed_attr:
+                    low, high = constraint[item]
+                    node_attr[item] = get_uniform(
+                        low, high, discrete=discrete_rv
+                    )
+                    if item == 'joint_range':
+                        node_attr[item] = int(node_attr[item])
+
+            elif 'walker' in task:
+                constraint = CREATURE_HARD_CONSTRAINT['walker']
+                needed_attr = ['u', 'v', 'axis_x', 'axis_y',
+                               'a_size', 'b_size', 'c_size', 'joint_range']
+                for item in needed_attr:
+                    low, high = constraint[item]
+                    node_attr[item] = get_uniform(
+                        low, high, discrete=discrete_rv
+                    )
+                    if item == 'joint_range':
+                        node_attr[item] = int(node_attr[item])
+
+            elif 'hopper' in task:
+                constraint = CREATURE_HARD_CONSTRAINT['hopper']
+                needed_attr = ['u', 'v', 'axis_x', 'axis_y',
+                               'a_size', 'b_size', 'c_size', 'joint_range']
+                for item in needed_attr:
+                    low, high = constraint[item]
+                    node_attr[item] = get_uniform(
+                        low, high, discrete=discrete_rv
+                    )
+                    if item == 'joint_range':
+                        node_attr[item] = int(node_attr[item])
+            elif 'cheetah' in task:
+                constraint = CREATURE_HARD_CONSTRAINT['walker']
+                needed_attr = ['u', 'v', 'axis_x', 'axis_y',
+                               'a_size', 'b_size', 'c_size', 'joint_range']
+                for item in needed_attr:
+                    low, high = constraint[item]
+                    node_attr[item] = get_uniform(
+                        low, high, discrete=discrete_rv
+                    )
+                    if item == 'joint_range':
+                        node_attr[item] = int(node_attr[item])
+
+            return node_attr
+
+        node_attr_list = []
+        for i in range(node_num):
+            node_attr = gen_one_attr(task, discrete_rv=discrete_rv)
+            node_attr_list.append(node_attr)
+
+        node_attr_list[0] = root_default(task)
+        return node_attr_list
+
+    def get_gene(self):
+        '''
+        '''
+        adj_mat, node_attr = self.struct_tree.to_mujoco_format()
+
+        # if 'fish' in self.args.task:
+        #     adj_mat[adj_mat > 0] = 7
+        # elif 'walker' in self.args.task or \
+        #         'cheetah' in self.args.task or \
+        #         'hopper' in self.args.task:
+        adj_mat[adj_mat > 0] = 2
+
+        return adj_mat, node_attr
+
+    def get_xml(self):
+        '''
+        '''
+        adj_mat, node_attr = self.get_gene()
+
+        # if 'fish' in self.args.task:
+        #     xml_struct = model_gen.fish_xml_generator(adj_mat, node_attr, options=None)
+        # elif 'walker' in self.args.task:
+        #     xml_struct = model_gen.walker_xml_generator(adj_mat, node_attr, options=None)
+        # elif 'hopper' in self.args.task:
+        #     xml_struct = model_gen.hopper_xml_generator(adj_mat, node_attr, options=None)
+        # elif 'cheetah' in self.args.task:
+        #     xml_struct = model_gen.cheetah_xml_generator(adj_mat, node_attr, options=None)
+
+        xml_struct = hopper_xml_generator(adj_mat, node_attr, options=None)
+        xml_str = etree.tostring(xml_struct, pretty_print=True)
+        return xml_struct, xml_str
+
+    def dfs_order2(self, adj_mat):
+        '''
+            return the order of parent-child relationship in the tree structure
+            described by the adj_matrix
+            input:
+                1. adj_mat an N x N matrix in which index 0 is the root
+                2. the matrix is symmetric
+            output:
+                1. a list of '%d-%d's decribing the order of parent-child relationship
+                   run using dfs
+        '''
+
+        def dfs_order_helper(adj_mat, node_id, cur_order):
+            '''
+            '''
+            # get child_list
+            node_row = np.copy(adj_mat[node_id])
+            for i in range(node_id + 1): node_row[i] = 0
+            child_list = np.where(node_row)[0].tolist()
+
+            for child_node in child_list:
+                edge = '%d-%d' % (node_id, child_node)
+                cur_order.append(edge)
+                dfs_order_helper(adj_mat, child_node, cur_order)
+
+            return cur_order
+
+        # using recursion to solve the problem
+        dfs_order = []
+        dfs_order = dfs_order_helper(adj_mat, 0, dfs_order)
+        return dfs_order
+
+    def gaussian_noise(self, mu, std, discrete, step_size=None, ):
+        '''
+        '''
+        if discrete and (step_size is None):
+            raise RuntimeError('Gaussian noise cannot handle discrete without a step')
+
+        if not discrete:
+            noise = float(np.random.normal(mu, std, 1))
+            return noise
+
+        # sample by a step size if discrete
+        noise = int(np.around(np.random.normal(0, 1, 1)))
+        return noise * step_size
+
+    def perturb_one_local(self, node_attr, task='fish', perturb_geom=False, discrete=True):
+        ''' perform local perturbation according to current attributes
+        '''
+        new_attr = deepcopy(node_attr)
+
+        # if 'fish' in task:
+        #     constraint = CREATURE_HARD_CONSTRAINT['fish']
+        # elif 'walker' in task:
+        #     constraint = CREATURE_HARD_CONSTRAINT['walker']
+        # elif 'cheetah' in task:
+        #     constraint = CREATURE_HARD_CONSTRAINT['cheetah']
+        # elif 'hopper' in task:
+        constraint = CREATURE_HARD_CONSTRAINT['hopper']
+
+        attr_list = ['u', 'v', 'axis_x', 'axis_y',
+                     'a_size', 'b_size', 'c_size', 'joint_range']
+
+        for attr in attr_list:
+            low, high = constraint[attr]
+            step_size = (high - low) / 6  # ideally this should be a hyperparameter to tune
+
+            new_attr[attr] = node_attr[attr] + \
+                             self.gaussian_noise(0, step_size / 2,
+                                                           discrete, step_size)
+            new_attr[attr] = \
+                float(np.clip(new_attr[attr], low, high))
+            if 'joint_range' == attr:
+                new_attr[attr] = int(new_attr[attr])
+
+        return new_attr
+
+    def perturb_one_attr(self, node_attr, task='fish', perturb_geom=False, perturb_discrete=True):
+        '''
+            brief: perturb the 7D parameters
+
+            NOTE: some basic stuff
+                        1. consider whether the perturbation physically makes sense
+                            (the perturbation will always makes sense
+                            if we have reasonable upper and lower bounds)
+        '''
+
+        new_attr = self.perturb_one_local(node_attr, task=task,
+                                     discrete=perturb_discrete
+                                     )
+        return new_attr
+
+
+
+    def generate_one_node(self, only_one=False):
+        ''' return a list of new nodes being generated
+        '''
+        NEW_STRUCT_OPTS = ['l1-basic', 'l2-symmetry']
+        # different policy for adding new hierarchical structure
+        if self.allow_hierarchy:
+            choice = random.choice(NEW_STRUCT_OPTS)
+        else:
+            choice = NEW_STRUCT_OPTS[0]
+
+        if self.force_symmetric:
+            choice = 'l2-symmetry'
+        if only_one:
+            choice = 'l1-basic'
+        # if self.args.walker_force_no_sym:
+        #     choice = 'l1-basic'
+
+        new_node_list = []
+        if choice == 'l1-basic':
+            # adding one basic node
+            new_node = Node(-1,
+                            self.gen_test_node_attr(task='hopper',
+                                                         node_num=2, discrete_rv=self.discrete
+                                                         )[-1]
+                            )
+            new_node_list.append(new_node)
+        elif choice == 'l2-symmetry':
+            # adding 2 symmetric nodes
+            attr1, attr2 = [
+                self.gen_test_node_attr(task='hopper',
+                                             node_num=2,
+                                             discrete_rv=self.discrete
+                                             )[-1]
+                for i in range(2)
+            ]
+            same_attr = ['a_size', 'b_size', 'c_size', 'geom_type',
+                         'joint_range']
+            for item in same_attr:
+                attr2[item] = attr1[item]
+            # set certain attributes
+            attr2['u'] = np.pi - attr1['u']
+            while attr2['u'] < 0: attr2['u'] += 2 * np.pi
+            attr2['v'] = attr1['v']
+            attr2['axis_x'] = attr1['axis_x']
+            attr2['axis_y'] = -attr1['axis_y']
+            # create the new node with corresponding attributes
+            node1 = Node(-1, attr1)
+            node2 = Node(-1, attr2)
+            new_node_list.append(node1)
+            new_node_list.append(node2)
+        else:
+            raise NotImplementedError
+
+        # if self.args.force_grow_at_ends:
+        #     for node in new_node_list:
+        #         node.attr['axis_x'] = 1 if node.attr['axis_x'] >= 0 else -1
+
+        return new_node_list
+
+    def perturb_add(self, no_selfcross=False):
+        '''
+        '''
+        debug_info = {}
+        debug_info['op'] = 'add_node'
+
+        # prepare debug info -- for updating weights in GGNN
+        edge_dfs = self.dfs_order2(self.get_gene()[0])
+        dfs_order = [0] + [int(edge.split('-')[-1]) for edge in edge_dfs]
+        debug_info['old_order'] = deepcopy(dfs_order)
+        debug_info['old_nodes'] = sorted(self.struct_tree.root.get_all_node_id())
+        debug_info['new_nodes'] = sorted(self.struct_tree.root.get_all_node_id())
+
+        debug_info['parent'] = []
+
+        all_nodes = self.struct_tree.get_all_nodes()
+        one_node_added = False
+
+        while one_node_added == False:
+            # iterate through all the nodes
+            for node in all_nodes:
+                not_add_node = np.random.binomial(1, 1 - self.p)
+
+                if not_add_node:
+                    continue
+
+                # if 'walker' in self.args.task and self.args.walker_more_constraint:
+                #     # check the node type and childs
+                #     if len(node.get_child_list()) >= 2: continue
+                #     if node is not self.struct_tree.get_root():
+                #         if len(node.get_child_list()) >= 1: continue
+
+                one_node_added = True
+
+                # sample a place to add the new struct
+                one_node = node
+                debug_info['parent'].append(one_node.get_node_id())
+
+
+                use_selfcross = np.random.binomial(1, self.self_cross_ratio)
+                if no_selfcross or not use_selfcross:
+                    new_node_list = self.generate_one_node()
+                else:
+                    debug_info['other'] = 'using self cross'
+                    self_struct = random.choice(all_nodes)
+                    while self_struct is self.struct_tree.get_root():
+                        self_struct = random.choice(all_nodes)
+                    self_struct = deepcopy(self_struct)
+                    new_node_list = [self_struct]
+
+                for node in new_node_list:
+                    self.struct_tree.add_sub_tree(one_node, node)
+                    debug_info['new_nodes'].append(-1)
+
+        # new order, still the dfs order with new element value being -1
+        prev_node_num = len(debug_info['old_order'])
+        edge_dfs = self.dfs_order2(self.get_gene()[0])
+        dfs_order = [0] + [int(edge.split('-')[-1]) for edge in edge_dfs]
+        debug_info['new_order'] = deepcopy(dfs_order)
+        debug_info['new_order'] = [-1 if x >= prev_node_num else x
+                                   for x in debug_info['new_order']
+                                   ]
+
+        return debug_info
+
+    def perturb_remove(self):
+        '''
+        '''
+        # randomly sample a node and remove all its subtree
+        debug_info = {}
+        debug_info['op'] = 'rm_node'
+        edge_dfs = self.dfs_order2(self.get_gene()[0])
+        dfs_order = [0] + [int(edge.split('-')[-1]) for edge in edge_dfs]
+        debug_info['old_order'] = deepcopy(dfs_order)
+        debug_info['new_order'] = deepcopy(dfs_order)
+        debug_info['old_nodes'] = sorted(self.struct_tree.root.get_all_node_id())
+        debug_info['new_nodes'] = sorted(self.struct_tree.root.get_all_node_id())
+
+        # sample the parent node to remove from
+        one_node = self.struct_tree.sample_node()
+        while len(one_node.get_child_list()) == 0:
+            one_node = self.struct_tree.sample_node()
+
+        delete_list = []
+        bak_list = []
+        remove_node_id_list = []
+        # sample a child to start with
+        child_node = random.choice(one_node.get_child_list())
+        delete_list.append(child_node)
+        bak_list.append(deepcopy(child_node))
+        remove_node_id_list += child_node.get_all_node_id()
+
+        if self.force_symmetric:
+            # also find the node of the same size among the child
+            for node in one_node.get_child_list():
+                if node is child_node:
+                    continue
+                if node.is_same_size(child_node):
+                    delete_list.append(node)
+                    bak_list.append(deepcopy(node))
+                    remove_node_id_list += node.get_all_node_id()
+                    break
+
+        # remove subtree from the parent
+        for node_to_delete in delete_list:
+            self.struct_tree.remove_sub_tree(one_node, node_to_delete)
+
+        # if there is only root left, add everything back
+        if self.struct_tree.total_num == 1:
+            debug_info['op'] = 'none'
+            root = self.struct_tree.sample_node()
+            for bak_node in bak_list:
+                self.struct_tree.add_sub_tree(root, bak_node)
+            return debug_info
+
+        debug_info['delete_node'] = []
+        for rm_node_id in remove_node_id_list:
+            debug_info['new_nodes'].remove(rm_node_id)
+            debug_info['new_order'].remove(rm_node_id)
+            debug_info['delete_node'].append(rm_node_id)
+        return debug_info
+
+    def perturb_attr(self):
+        '''
+        '''
+        debug_info = {}
+        debug_info['op'] = 'change_attr'
+        all_nodes = self.struct_tree.get_all_nodes()
+
+        one_node_mutate = False
+
+        while one_node_mutate == False:
+            for node in all_nodes:
+                # no need to perturb the root
+                if node is self.struct_tree.root: continue
+
+                if np.random.binomial(1, self.p):
+                    one_node_mutate = True
+
+                    if self.force_symmetric:
+                        # search for the one with the same size
+                        node2 = None
+                        for another_node in all_nodes:
+                            if another_node is node: continue
+                            if another_node.is_same_size(node):
+                                node2 = another_node
+                        if node2 is None:
+                            import pdb;
+                            pdb.set_trace()
+                    # regardless of forcing symmetry or not, we need to make the
+                    # perturbation
+                    node.set_attr(
+                        self.perturb_one_attr(node.get_attr(),
+                                                       task='hopper',
+                                                       perturb_discrete=self.discrete
+                                                       )
+                    )
+
+                    if self.force_symmetric:
+                        node2.set_attr(
+                            node.make_symmetric('hopper',
+                                                self.discrete
+                                                ).get_attr()
+                        )
+
+                else:
+                    pass
+
+        return debug_info
+
+    def mutate(self):
+        '''
+        '''
+        # op = np.random.choice(
+        #     ['add', 'remove', 'perturb'], 1,
+        #     p=[self.mutation_add_ratio,
+        #        self.mutation_delete_ratio, 1 - self.mutation_add_ratio - self.mutation_delete_ratio]
+        # )
+
+        op = 'perturb'
+        debug_info = {}
+        debug_info['old_mat'] = self.get_gene()[0]
+        debug_info['old_pc'] = self.struct_tree.get_pc_relation()
+
+
+
+        # setting some hard constraint,
+        # fixing the maximum and minimum number of nodes allowed in the body
+        # if len(self.get_gene()[1]) >= 10 and op == 'add':
+        #     op = 'perturb'
+        # if len(self.get_gene()[1]) == 2 and op == 'remove':
+        #     op = 'perturb'
+
+        if op == 'add':
+            perturb_info = self.perturb_add()
+        elif op == 'remove':
+            perturb_info = self.perturb_remove()
+        elif op == 'perturb':
+            perturb_info = self.perturb_attr()
+
+        debug_info = {**debug_info, **perturb_info}
+
+        return debug_info
+
+def get_original_hopper():
+    '''
+    '''
+    r_node = Node(0, CREATURE_ROOT_INFO['hopper'])
+    pelvis = Node(0, CREATURE_ORIGINAL_ATTR['hopper'][0])
+    thigh = Node(0, CREATURE_ORIGINAL_ATTR['hopper'][1])
+    calf = Node(0, CREATURE_ORIGINAL_ATTR['hopper'][2])
+    foot = Node(0, CREATURE_ORIGINAL_ATTR['hopper'][3])
+
+    calf.add_child(foot)
+    thigh.add_child(calf)
+    pelvis.add_child(thigh)
+    r_node.add_child(pelvis)
+
+    return r_node
+
+import os.path as osp
+import sys
+import datetime
+import pdb
+
+def add_path(path):
+    if path not in sys.path:
+        sys.path.insert(0, path)
+
+
+# get current time
+running_start_time = datetime.datetime.now()
+time = str(running_start_time.strftime("%Y_%m_%d-%X"))
+
+# get current file path
+_this_dir = osp.dirname(__file__)
+_base_dir = osp.join(_this_dir)
+add_path(_base_dir)
+print(_base_dir)
+
+
+def init_path():
+    ''' function to be called in the beginning of the file
+    '''
+    _this_dir = osp.dirname(__file__)
+    _base_dir = osp.join(_this_dir, '..')
+    add_path(_base_dir)
+    return None
+
+
+def bypass_frost_warning():
+    return 0
+
+
+def get_base_dir():
+    return _base_dir
+
+
+def get_time():
+    return time
+
+
+def get_abs_base_dir():
+    return osp.abspath(_base_dir)
+
+
+def xml_string_to_file(xml, filename):
+    '''
+    '''
+    if filename == None:
+        return
+
+    with open(filename, 'wb') as fd:
+        fd.write(xml)
+    return
+
+
+
+
+# making struct_tree
+body_part_num = 10
+spc = Species(body_num=body_part_num)
+max_evo_step = 2
+
+for i in range(max_evo_step):
+    # generate hopper xml file
+    adj_mat, node_attr = spc.get_gene()
+    xml_struct, xml_str = spc.get_xml()
+    file_path = os.path.join(get_base_dir(),
+        'test_hierarchy_perturb.xml'
+    )
+    xml_string_to_file(xml_str, file_path)
+
+    debug_info = spc.mutate()
+    print('step # %d, Mutate option: %s' %(i,debug_info['op']))
+
+xml_path = file_path
+model = load_model_from_path(xml_path)
+sim = MjSim(model)
+
+t = 0
+viewer = MjViewer(sim)
+ls_wow=[]
+
+
 print('process')
 
 # print(node_info['tree'])
-# while True:
-#     t += 1
-#     sim.step()
-#     viewer.render()
+while True:
+    t += 1
+    sim.step()
+    viewer.render()
 
 
 
